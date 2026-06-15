@@ -32,3 +32,4 @@ Thumbs.db
 
 # GUI dist (if built separately)
 NextAgentGUI/dist/
+dist/
