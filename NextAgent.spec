@@ -29,6 +29,7 @@ exe = EXE(
     a.datas,
     [],
     name="NextAgent",
+    icon=r"assets\app.ico",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
