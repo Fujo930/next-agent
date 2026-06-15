@@ -809,9 +809,16 @@ function CodeDashboard({ range, setRange, statsView, setStatsView, stats, online
 }
 
 function CodeConversation({ conversation }) {
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [conversation]);
+
   return <section className="code-conversation">
     <header><Monitor size={17} /><strong>{conversation.title}</strong><CaretDown size={14} /></header>
-    <div className="code-conversation-feed">
+    <div className="code-conversation-feed" ref={scrollRef}>
       {conversationTurns(conversation).map((turn, index) => {
         const thinking = turn.status === "thinking";
         return <div className="conversation-turn" key={`${index}-${turn.title}`}>
@@ -859,10 +866,17 @@ function DeepSeekWhale({ working = false }) {
 }
 
 function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePrompt, stopResponse, queuedPrompt, model, setModel, busy }) {
+  const scrollRef = useRef(null);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [conversation]);
+
   return <section className="work-conversation chat-only">
     <div className="conversation-main">
       <header className="conversation-title"><strong>{conversation.title}</strong><CaretDown size={16} /></header>
-      <div className="conversation-scroll">
+      <div className="conversation-scroll" ref={scrollRef}>
         <div className="conversation-feed">
           {conversationTurns(conversation).map((turn, index) => {
             const turnThinking = turn.status === "thinking";
