@@ -1,4 +1,4 @@
-; NextAgent Windows Installer - NSIS 3.x
+; NextAgent Windows Installer
 !define PRODUCT_NAME "NextAgent"
 !define PRODUCT_VERSION "0.2.0"
 !define PRODUCT_PUBLISHER "NextAgent"
@@ -15,6 +15,8 @@ InstallDir "$PROGRAMFILES\NextAgent"
 RequestExecutionLevel admin
 
 !define MUI_ABORTWARNING
+!define MUI_ICON "..\assets\app.ico"
+!define MUI_UNICON "..\assets\app.ico"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\NextAgent.exe"
 
 !insertmacro MUI_PAGE_WELCOME
@@ -31,24 +33,20 @@ RequestExecutionLevel admin
 Section "Install"
   SetOutPath "$INSTDIR"
   SetOverwrite on
-  
   File "..\dist\NextAgent.exe"
+  File "..\assets\app.ico"
   CreateDirectory "$INSTDIR\data"
-  
   WriteUninstaller "$INSTDIR\uninst.exe"
   
-  ; Start Menu
   CreateDirectory "$SMPROGRAMS\NextAgent"
-  CreateShortCut "$SMPROGRAMS\NextAgent\NextAgent.lnk" "$INSTDIR\NextAgent.exe"
+  CreateShortCut "$SMPROGRAMS\NextAgent\NextAgent.lnk" "$INSTDIR\NextAgent.exe" "" "$INSTDIR\app.ico"
   CreateShortCut "$SMPROGRAMS\NextAgent\Uninstall NextAgent.lnk" "$INSTDIR\uninst.exe"
+  CreateShortCut "$DESKTOP\NextAgent.lnk" "$INSTDIR\NextAgent.exe" "" "$INSTDIR\app.ico"
   
-  ; Desktop shortcut
-  CreateShortCut "$DESKTOP\NextAgent.lnk" "$INSTDIR\NextAgent.exe"
-  
-  ; Uninstall registry
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "DisplayName" "NextAgent"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "UninstallString" "$INSTDIR\uninst.exe"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "DisplayVersion" "${PRODUCT_VERSION}"
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "DisplayIcon" "$INSTDIR\app.ico"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "Publisher" "${PRODUCT_PUBLISHER}"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent" "NoRepair" 1
@@ -60,15 +58,14 @@ SectionEnd
 
 Section "Uninstall"
   Delete "$INSTDIR\NextAgent.exe"
+  Delete "$INSTDIR\app.ico"
   Delete "$INSTDIR\uninst.exe"
   RMDir /r "$INSTDIR\data"
   RMDir "$INSTDIR"
-  
   Delete "$SMPROGRAMS\NextAgent\NextAgent.lnk"
   Delete "$SMPROGRAMS\NextAgent\Uninstall NextAgent.lnk"
   RMDir "$SMPROGRAMS\NextAgent"
   Delete "$DESKTOP\NextAgent.lnk"
-  
   DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\NextAgent"
   SetAutoClose true
 SectionEnd
