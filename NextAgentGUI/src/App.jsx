@@ -45,11 +45,17 @@ import {
 } from "@phosphor-icons/react";
 import { coreApi } from "./core-api";
 import zh from "./zh-CN.js";
+import en from "./en.js";
 
 let _lang = "en";
 export function t(key, ...args) {
   if (_lang === "zh" && zh[key]) {
     const v = zh[key];
+    return typeof v === "function" ? v(...args) : v;
+  }
+  // English fallback
+  if (en[key]) {
+    const v = en[key];
     return typeof v === "function" ? v(...args) : v;
   }
   return args.length ? `${key}(${args.join(",")})` : key;
