@@ -44,10 +44,10 @@ const en = {
   enableAgentMode: "Enable Agent mode in Settings",
 
   // Dswork home
-  whatCanIHelp: "What can I help with?",
+  whatCanIHelp: "What can I help you with?",
   homeDesc: "Chat, brainstorm, write, and explore ideas directly with DeepSeek.",
   howCanIHelp: "How can I help you today?",
-  workInProject: "Work in a project",
+  workInProject: "Work on a project",
   active: "Active",
   clearActive: "Clear active",
   conversationStarted: "Conversation started.",
