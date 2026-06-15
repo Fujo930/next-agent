@@ -18,9 +18,9 @@ export const coreApi = {
   saveState: (payload) => request("/api/state", { method: "POST", body: JSON.stringify(payload) }),
   saveConfig: (apiKey) => request("/api/config", { method: "POST", body: JSON.stringify({ api_key: apiKey }) }),
   createSession: (payload = {}) => request("/api/sessions", { method: "POST", body: JSON.stringify(payload) }),
-  chat: (messages, model, sessionId) => request("/api/chat", {
+  chat: (messages, model, sessionId, effort = "high") => request("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ messages, model, session_id: sessionId }),
+    body: JSON.stringify({ messages, model, session_id: sessionId, effort }),
   }),
   sendMessage: (sessionId, message) => request(`/api/sessions/${sessionId}/messages`, {
     method: "POST",

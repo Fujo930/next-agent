@@ -74,7 +74,7 @@ class SessionStore:
         self._dswork_agents: dict[str, Agent] = {}
         self._restore_code_sessions()
 
-    def _new_agent(self, model: str, workdir: str) -> Agent:
+    def _new_agent(self, model: str, workdir: str, effort: str = "high", auto_model: bool = True) -> Agent:
         file_config = load_config()
         config = AgentConfig(
             model=model,
@@ -83,6 +83,8 @@ class SessionStore:
             enable_cache_dash=True,
             enable_lang_router=file_config.get("language", "auto") != "en",
             stream=False,
+            effort=effort,
+            auto_model=auto_model,
         )
         return Agent(config=config, llm_config=self.llm_config(model, workdir))
 
@@ -257,7 +259,7 @@ class SessionStore:
             self.state.upsert_conversation(record, "code")
             record["run_lock"].release()
 
-    def chat(self, messages: list[dict[str, str]], model: str | None = None, session_id: str | None = None) -> dict[str, Any]:
+    def chat(self, messages: list[dict[str, str]], model: str | None = None, session_id: str | None = None, effort: str = "high", auto_model: bool = True) -> dict[str, Any]:
         """Run a DeepSeek conversation with Agent (frozen prefix + tools + compression).
 
         Each session_id gets a persistent Agent instance so the prefix cache
@@ -278,7 +280,7 @@ class SessionStore:
 
         if agent is None:
             # New session: create Agent; all messages are history
-            agent = self._new_agent(selected_model, self.default_workdir)
+            agent = self._new_agent(selected_model, self.default_workdir, effort=effort, auto_model=auto_model)
             # Feed all but the last user message as history
             for msg in clean_messages[:-1]:
                 agent.messages.append(msg)
@@ -325,7 +327,7 @@ class SessionStore:
                     "conversation": {"title": first_title, "status": "complete", "turns": turns},
                 }, "dswork")
 
-            return {"response": response_text, "usage": {}, "model": selected_model}
+            return {"response": response_text, "usage": {}, "model": agent.config.model}
         except Exception as exc:
             raise RuntimeError(_safe_provider_error(exc)) from exc
 
@@ -452,7 +454,12 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
                 messages = body.get("messages", [])
                 if messages:
                     self.store.remember_user_message(str(messages[-1].get("content", "")))
-                result = self.store.chat(messages, body.get("model"), str(body.get("session_id") or "") or None)
+                result = self.store.chat(
+                    messages, body.get("model"),
+                    str(body.get("session_id") or "") or None,
+                    effort=str(body.get("effort", "high")).lower(),
+                    auto_model=body.get("auto_model", True),
+                )
                 self._send(HTTPStatus.OK, result)
                 return
             if path == "/api/state":

@@ -234,6 +234,8 @@ class AgentConfig:
     enable_snapshots: bool = True
     enable_redaction: bool = True
     stream: bool = False
+    effort: str = "high"  # low / medium / high / max
+    auto_model: bool = True  # auto-select flash/pro based on task complexity
 
 
 # ── Agent ─────────────────────────────────────────────────────
@@ -320,6 +322,38 @@ class Agent:
             decision = LanguageRouter.route(user_input)
             lang_extension = decision.prompt_extension
 
+        # ── I: Cost-aware model routing (first turn only) ──
+        if self.turn_count == 1 and self.config.auto_model:
+            selection = self.model_router.select(
+                user_input,
+                file_count=getattr(self, "_workspace_file_count", 0),
+                size_mb=getattr(self, "_workspace_size_mb", 0.0),
+                language_count=getattr(self, "_workspace_language_count", 1),
+            )
+            if selection.model != self.config.model:
+                # Switch model and rebuild LLM adapter
+                old_model = self.config.model
+                self.config.model = selection.model
+                new_llm_config = LLMConfig.from_env(selection.model)
+                self.llm = LLMAdapter(new_llm_config)
+                self.cache_dash = CacheDashboard(model=selection.model)
+                # Note reason for cost analysis
+                self._model_switch_reason = selection.reasons
+            else:
+                self._model_switch_reason = selection.reasons
+
+        # Apply effort level → temperature/max_tokens
+        effort_map = {
+            "low":    (0.7, 2048),
+            "medium": (0.3, 4096),
+            "high":   (0.0, 8192),
+            "max":    (0.0, 16384),
+        }
+        eff_temp, eff_tokens = effort_map.get(self.config.effort, (0.0, 8192))
+        # Store on instance so _do_llm_call can use them
+        self._effort_temperature = eff_temp
+        self._effort_max_tokens = eff_tokens
+
         # ── Command resolution ──
         cmd, resolved_input = self.commands.resolve(user_input)
         user_prompt = resolved_input if cmd else user_input
@@ -383,6 +417,8 @@ class Agent:
                     messages=full_messages,
                     tools=tools,
                     tool_choice="auto",
+                    temperature=getattr(self, "_effort_temperature", 0.0),
+                    max_tokens=getattr(self, "_effort_max_tokens", 8192),
                 ):
                     if chunk.type == "content":
                         print(chunk.content, end="", flush=True)
@@ -412,6 +448,8 @@ class Agent:
                     messages=full_messages,
                     tools=tools,
                     tool_choice="auto",
+                    temperature=getattr(self, "_effort_temperature", 0.0),
+                    max_tokens=getattr(self, "_effort_max_tokens", 8192),
                 )
 
             # ── D: Record cache metrics ──

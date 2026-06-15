@@ -211,6 +211,11 @@ def main():
         help="Enable streaming mode — print LLM output as it arrives",
     )
     parser.add_argument(
+        "--effort", default="high",
+        choices=["low", "medium", "high", "max"],
+        help="Effort level: low/medium/high/max (affects temperature, max_tokens, model selection)",
+    )
+    parser.add_argument(
         "--version", "-v", action="store_true",
         help="Show version",
     )
@@ -242,6 +247,7 @@ def main():
         enable_lang_router=not args.no_lang and os.environ.get("NEXT_LANG", file_config.get("language", "auto")) != "en",
         enable_compression=not args.no_compression,
         stream=args.stream or file_config.get("stream", False),
+        effort=args.effort,
     )
 
     llm_config = LLMConfig.from_provider(

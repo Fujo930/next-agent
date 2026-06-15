@@ -426,7 +426,7 @@ export function App() {
       try {
         setCoreBusy(true);
         setCoreError("");
-        const result = await coreApi.chat(chatMessages(thinkingConversation), model, taskId);
+        const result = await coreApi.chat(chatMessages(thinkingConversation), model, taskId, effort);
         if (generation !== requestGeneration.current) return;
         setWorkItems((current) => current.map((item) => item.id === taskId ? {
           ...item,
