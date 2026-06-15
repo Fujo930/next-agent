@@ -1,0 +1,37 @@
+{
+  "projects": [
+    {
+      "id": "project-1",
+      "name": "Docs",
+      "path": "C:\\Users\\hooya\\next-agent\\.pytest-tmp\\pytest-of-hooya\\pytest-0\\test_workspace_features_surviv0"
+    }
+  ],
+  "scheduled": [
+    {
+      "id": "schedule-1",
+      "name": "Daily brief",
+      "enabled": true
+    }
+  ],
+  "artifacts": [
+    {
+      "id": "artifact-1",
+      "name": "Status board",
+      "html": "<h1>Status</h1>"
+    }
+  ],
+  "connectors": [
+    {
+      "id": "connector-1",
+      "name": "GitHub",
+      "url": "https://github.com"
+    }
+  ],
+  "plugins": [
+    {
+      "id": "plugin-1",
+      "name": "Release notes",
+      "installed": true
+    }
+  ]
+}

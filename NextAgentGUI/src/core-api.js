@@ -14,8 +14,11 @@ export const coreApi = {
   sessions: () => request("/api/sessions"),
   stats: () => request("/api/stats"),
   state: () => request("/api/state"),
+  skills: () => request("/api/skills"),
   workspace: () => request("/api/workspace"),
   saveState: (payload) => request("/api/state", { method: "POST", body: JSON.stringify(payload) }),
+  createSkill: (payload) => request("/api/skills", { method: "POST", body: JSON.stringify(payload) }),
+  reset: () => request("/api/reset", { method: "POST", body: "{}" }),
   saveConfig: (apiKey) => request("/api/config", { method: "POST", body: JSON.stringify({ api_key: apiKey }) }),
   createSession: (payload = {}) => request("/api/sessions", { method: "POST", body: JSON.stringify(payload) }),
   chat: (messages, model, sessionId, effort = "high") => request("/api/chat", {

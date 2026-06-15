@@ -26,6 +26,7 @@ from .gui_state import GUIStateDB
 from .llm import LLMAdapter, LLMConfig
 from .memory import MemoryManager
 from .setup import load_config
+from .skills import SkillManager
 from .workspace import build_snapshot
 
 
@@ -51,12 +52,12 @@ def _safe_provider_error(exc: Exception) -> str:
     message = str(exc)
     lowered = message.lower()
     if "401" in message or "authentication" in lowered or "api key" in lowered:
-        return f"DeepSeek authentication failed. Update DEEPSEEK_API_KEY or the workspace .api_key file. [{message[:200]}]"
+        return "DeepSeek authentication failed. Update DEEPSEEK_API_KEY or the workspace .api_key file."
     if "429" in message or "rate limit" in lowered:
-        return f"DeepSeek rate limit reached. Wait briefly, then try again. [{message[:200]}]"
+        return "DeepSeek rate limit reached. Wait briefly, then try again."
     if "timeout" in lowered:
-        return f"The DeepSeek request timed out. Check the network and try again. [{message[:200]}]"
-    return f"NextAgent core error: {message[:500]}"
+        return "The DeepSeek request timed out. Check the network and try again."
+    return "NextAgent core could not complete the request. Check the core service logs."
 
 
 class SessionStore:
@@ -70,9 +71,38 @@ class SessionStore:
             else app_data_dir() / "gui_state.db"
         )
         self.state = GUIStateDB(state_path or default_state_path)
+        self.extra_state_path = self.state.path.with_name("workspace_state.json")
         self.memory = MemoryManager()
+        self.skills = SkillManager()
         self._dswork_agents: dict[str, Agent] = {}
         self._restore_code_sessions()
+
+    def _load_extra_state(self) -> dict[str, Any]:
+        defaults = {
+            "projects": [],
+            "scheduled": [],
+            "artifacts": [],
+            "connectors": [],
+            "plugins": [],
+        }
+        if not self.extra_state_path.is_file():
+            return defaults
+        try:
+            payload = json.loads(self.extra_state_path.read_text(encoding="utf-8"))
+            return {key: payload.get(key, value) for key, value in defaults.items()}
+        except (OSError, json.JSONDecodeError, AttributeError):
+            return defaults
+
+    def _save_extra_state(self, payload: dict[str, Any]) -> None:
+        current = self._load_extra_state()
+        for key in current:
+            if key in payload and isinstance(payload[key], list):
+                current[key] = payload[key]
+        self.extra_state_path.parent.mkdir(parents=True, exist_ok=True)
+        self.extra_state_path.write_text(
+            json.dumps(current, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def _new_agent(self, model: str, workdir: str, effort: str = "high", auto_model: bool = True) -> Agent:
         file_config = load_config()
@@ -340,6 +370,7 @@ class SessionStore:
             "dswork": self.state.list_conversations("dswork"),
             "archived": self.state.list_conversations(archived=True),
             "memories": self.memory.stats(),
+            **self._load_extra_state(),
         }
 
     def save_gui_state(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -347,6 +378,7 @@ class SessionStore:
         dswork_items = payload.get("dswork", [])
         self.state.replace_mode("code", code_items)
         self.state.replace_mode("dswork", dswork_items)
+        self._save_extra_state(payload)
         with self._lock:
             for item in code_items:
                 record = self._sessions.get(str(item.get("id")))
@@ -368,6 +400,19 @@ class SessionStore:
     def close(self) -> None:
         self.state.close()
         self.memory.close()
+
+    def reset(self) -> None:
+        self.state.reset()
+        self.memory.db.conn.execute("DELETE FROM memories")
+        self.memory.db.conn.commit()
+        key_file = credential_file()
+        if key_file.exists():
+            key_file.unlink()
+        if self.extra_state_path.exists():
+            self.extra_state_path.unlink()
+        with self._lock:
+            self._sessions.clear()
+            self._dswork_agents.clear()
 
 
 class GUIRequestHandler(BaseHTTPRequestHandler):
@@ -426,6 +471,8 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, self.store.gui_state())
         elif path == "/api/memories":
             self._send(HTTPStatus.OK, {"memories": self.store.memory.list_all(limit=100), "stats": self.store.memory.stats()})
+        elif path == "/api/skills":
+            self._send(HTTPStatus.OK, {"skills": self.store.skills.list_skills(), "stats": self.store.skills.stats()})
         elif path == "/api/workspace":
             self._send(HTTPStatus.OK, {"workdir": self.store.default_workdir, "snapshot": build_snapshot(self.store.default_workdir)})
         elif self.static_dir:
@@ -464,6 +511,21 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
                 return
             if path == "/api/state":
                 self._send(HTTPStatus.OK, self.store.save_gui_state(body))
+                return
+            if path == "/api/skills":
+                name = str(body.get("name", "")).strip()
+                description = str(body.get("description", "")).strip()
+                content = str(body.get("content", "")).strip()
+                trigger = str(body.get("trigger", "")).strip()
+                if not name or not description or not content:
+                    self._send(HTTPStatus.BAD_REQUEST, {"error": "Name, description, and instructions are required"})
+                    return
+                skill = self.store.skills.create_skill(name, description, content, trigger, created_by="user")
+                self._send(HTTPStatus.CREATED, {"skill": skill.to_dict()})
+                return
+            if path == "/api/reset":
+                self.store.reset()
+                self._send(HTTPStatus.OK, {"ok": True})
                 return
 
             parts = path.strip("/").split("/")

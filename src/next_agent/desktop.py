@@ -7,6 +7,7 @@ import sys
 import threading
 import ctypes
 import time
+import webbrowser
 from pathlib import Path
 
 import webview
@@ -92,16 +93,21 @@ class DesktopBridge:
     def __init__(self):
         self._window = None
 
-    def enter_workspace(self):
-        def resize_workspace():
+    def _resize_centered(self, size: tuple[int, int]):
+        def resize():
             if not self._window:
                 return
-            width, height = WORKSPACE_SIZE
-            self._window.resize(width, height)
+            self._window.resize(*size)
             time.sleep(0.05)
             center_native_window()
 
-        threading.Timer(0.1, resize_workspace).start()
+        threading.Timer(0.1, resize).start()
+
+    def enter_workspace(self):
+        self._resize_centered(WORKSPACE_SIZE)
+
+    def enter_setup(self):
+        self._resize_centered(SETUP_SIZE)
 
     def choose_folder(self):
         if not self._window:
@@ -114,6 +120,19 @@ class DesktopBridge:
             return []
         selected = self._window.create_file_dialog(webview.OPEN_DIALOG, allow_multiple=True)
         return list(selected or [])
+
+    def open_external(self, url: str):
+        if url.startswith(("https://", "http://")):
+            webbrowser.open(url)
+            return True
+        return False
+
+    def open_path(self, path: str):
+        candidate = Path(path).expanduser()
+        if not candidate.exists():
+            return False
+        os.startfile(str(candidate.resolve()))
+        return True
 
 
 def default_workdir() -> str:

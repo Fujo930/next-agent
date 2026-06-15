@@ -243,3 +243,9 @@ class GUIStateDB:
     def close(self) -> None:
         with self._lock:
             self.conn.close()
+
+    def reset(self) -> None:
+        with self._lock:
+            self.conn.execute("DELETE FROM usage_events")
+            self.conn.execute("DELETE FROM conversations")
+            self.conn.commit()

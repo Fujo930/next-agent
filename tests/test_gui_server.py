@@ -39,19 +39,30 @@ def test_session_runs_message_and_updates_stats(tmp_path):
     assert store.stats()["messages"] == 1
 
 
-def test_plain_chat_does_not_create_agent_session(tmp_path, monkeypatch):
+def test_dswork_chat_uses_isolated_agent_without_code_session(tmp_path, monkeypatch):
     store = SessionStore(str(tmp_path))
-
-    class FakeResponse:
-        content = "plain response"
-        usage = {"total_tokens": 4}
-        model = "deepseek-v4-flash"
-
-    monkeypatch.setattr("next_agent.gui_server.LLMAdapter.chat", lambda self, messages: FakeResponse())
+    monkeypatch.setattr("next_agent.gui_server.Agent.chat", lambda self, message: "agent response")
     result = store.chat([{"role": "user", "content": "hello"}])
 
-    assert result["response"] == "plain response"
+    assert result["response"] == "agent response"
     assert store.list() == []
+
+
+def test_reset_clears_gui_state_memory_and_credentials(tmp_path, monkeypatch):
+    monkeypatch.setenv("APPDATA", str(tmp_path))
+    store = SessionStore(str(tmp_path), state_path=tmp_path / "state.db")
+    store.create()
+    store.memory.remember("Remember me", "user")
+    store.state.add_usage(None, "dswork", "deepseek-v4-flash", {"prompt_tokens": 3})
+    store.save_api_key("sk-reset")
+
+    store.reset()
+
+    assert store.list() == []
+    assert store.gui_state()["dswork"] == []
+    assert store.stats()["total_tokens"] == 0
+    assert store.memory.stats()["total"] == 0
+    assert not credential_file().exists()
 
 
 def test_sessions_conversations_and_usage_survive_restart(tmp_path):
@@ -94,6 +105,28 @@ def test_sessions_conversations_and_usage_survive_restart(tmp_path):
     assert restored.list()[0]["conversation"]["turns"][0]["response"] == "Remembered."
     assert restored.gui_state()["dswork"][0]["id"] == "ds-persisted"
     assert restored.stats()["total_tokens"] == 15
+
+
+def test_workspace_features_survive_restart(tmp_path):
+    state_path = tmp_path / "gui-state.db"
+    store = SessionStore(str(tmp_path), state_path=state_path)
+    store.save_gui_state({
+        "code": [],
+        "dswork": [],
+        "projects": [{"id": "project-1", "name": "Docs", "path": str(tmp_path)}],
+        "scheduled": [{"id": "schedule-1", "name": "Daily brief", "enabled": True}],
+        "artifacts": [{"id": "artifact-1", "name": "Status board", "html": "<h1>Status</h1>"}],
+        "connectors": [{"id": "connector-1", "name": "GitHub", "url": "https://github.com"}],
+        "plugins": [{"id": "plugin-1", "name": "Release notes", "installed": True}],
+    })
+
+    restored = SessionStore(str(tmp_path), state_path=state_path).gui_state()
+
+    assert restored["projects"][0]["name"] == "Docs"
+    assert restored["scheduled"][0]["enabled"]
+    assert restored["artifacts"][0]["html"] == "<h1>Status</h1>"
+    assert restored["connectors"][0]["name"] == "GitHub"
+    assert restored["plugins"][0]["installed"]
 
 
 def test_provider_errors_are_sanitized():
