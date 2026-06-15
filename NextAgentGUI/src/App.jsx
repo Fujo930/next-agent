@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -973,16 +973,18 @@ function CodeDashboard({ range, setRange, statsView, setStatsView, stats, online
 }
 
 function CodeConversation({ conversation }) {
-  const bottomRef = useRef(null);
+  const scrollRef = useRef(null);
+  const turns = conversationTurns(conversation);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "instant" });
-  }, [conversation]);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns.length, turns[turns.length - 1]?.response]);
 
   return <section className="code-conversation">
     <header><Monitor size={17} /><strong>{conversation.title}</strong><CaretDown size={14} /></header>
-    <div className="code-conversation-feed">
-      {conversationTurns(conversation).map((turn, index) => {
+    <div className="code-conversation-feed" ref={scrollRef}>
+      {turns.map((turn, index) => {
         const thinking = turn.status === "thinking";
         return <div className="conversation-turn" key={`${index}-${turn.title}`}>
           <div className="user-message">{turn.title}</div>
@@ -990,7 +992,6 @@ function CodeConversation({ conversation }) {
           <div className="assistant-answer"><DeepSeekWhale working={thinking} />{thinking ? <p className="thinking-copy">{t("deepseekInspecting")}</p> : <MarkdownText text={turn.response} />}</div>
         </div>;
       })}
-      <div ref={bottomRef} />
     </div>
   </section>;
 }
@@ -1030,18 +1031,20 @@ function DeepSeekWhale({ working = false }) {
 }
 
 function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePrompt, stopResponse, queuedPrompt, model, setModel, busy, enterToSend }) {
-  const bottomRef = useRef(null);
+  const scrollRef = useRef(null);
+  const turns = conversationTurns(conversation);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "instant" });
-  }, [conversation]);
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [turns.length, turns[turns.length - 1]?.response]);
 
   return <section className="work-conversation chat-only">
     <div className="conversation-main">
       <header className="conversation-title"><strong>{conversation.title}</strong><CaretDown size={16} /></header>
-      <div className="conversation-scroll">
+      <div className="conversation-scroll" ref={scrollRef}>
         <div className="conversation-feed">
-          {conversationTurns(conversation).map((turn, index) => {
+          {turns.map((turn, index) => {
             const turnThinking = turn.status === "thinking";
             return <div className="conversation-turn" key={`${index}-${turn.title}`}>
               <div className="user-message">{turn.title}</div>
@@ -1053,7 +1056,6 @@ function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePr
               </div>
             </div>
           })}
-          <div ref={bottomRef} />
         </div>
       </div>
       <div className="conversation-composer">
