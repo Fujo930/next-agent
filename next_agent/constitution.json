@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "authority": [
+    "current user request",
+    "live code and tests",
+    "project constitution (this file)",
+    "REASONIX.md / AGENTS.md",
+    "memory",
+    "previous session context"
+  ],
+  "protected_invariants": [
+    "Keep the system prompt prefix byte-stable across turns (DeepSeek prefix cache).",
+    "Verify edits by reading files back before claiming success.",
+    "Never modify this constitution file.",
+    "Before destructive operations (rm, delete, overwrite), confirm with user."
+  ],
+  "verification_policy": {
+    "before_claiming_done": [
+      "Read changed files back to confirm the edit landed as intended.",
+      "Run syntax checks after editing code files (python -m py_compile, node -c, cargo check).",
+      "Never claim verification you did not perform."
+    ]
+  },
+  "escalate_when": [
+    "An action is destructive or hard to reverse and was not explicitly authorized.",
+    "Deleting or overwriting files you did not create.",
+    "Changing provider, auth, or configuration.",
+    "An API call fails with authentication error (API key issue)."
+  ]
+}
