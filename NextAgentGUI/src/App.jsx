@@ -591,6 +591,7 @@ export function App() {
             {query && <button onClick={() => setQuery("")} aria-label="Clear search"><X size={13} /></button>}
           </label>
 
+          <div className="sidebar-scroll">
           {filteredSessions.some((session) => session.pinned) && <><div className="section-title pinned-title"><span>Pinned</span></div>
             <nav className="session-list pinned-list">
               {filteredSessions.filter((session) => session.pinned).map((session) => <RecentItem key={session.id} session={session} />)}
@@ -601,6 +602,7 @@ export function App() {
             {filteredSessions.filter((session) => !session.pinned).map((session) => <RecentItem key={session.id} session={session} />)}
           </nav>
           {pinTip && <div className="pin-tip"><Hand size={20} weight="fill" /><span><strong>Tip:</strong> you can drag chats here to pin them</span></div>}
+          </div>
 
           <button className="profile">
             <span className="brand-mark"><Sparkle size={16} weight="fill" /></span>
