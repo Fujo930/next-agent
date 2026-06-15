@@ -732,7 +732,10 @@ export function App() {
             if (!isCode) setWorkPage("Home");
             createItem();
           }}><Plus size={17} /> {isCode ? t("newSession") : t("newTask")} <span>Ctrl N</span></button>
-          {!isCode && workNav.map(([Icon, label], i) => <button className={`sidebar-link ${workPage === label ? "current" : ""}`} key={label} onClick={() => setWorkPage(label)}><Icon size={17} /> {i === 0 ? t("projects") : i === 1 ? t("scheduled") : t("liveArtifacts")}</button>)}
+          {!isCode && workNav.map(([Icon, label], i) => {
+            const [pageName, tKey] = i === 0 ? ["Projects", "projects"] : i === 1 ? ["Scheduled", "scheduled"] : ["Live artifacts", "liveArtifacts"];
+            return <button className={`sidebar-link ${workPage === pageName ? "current" : ""}`} key={label} onClick={() => setWorkPage(pageName)}><Icon size={17} /> {t(tKey)}</button>;
+          })}
           <button className="sidebar-link" onClick={openCustomize}><Wrench size={17} /> {t("customize")}</button>
 
           <label className="search-box">
@@ -759,8 +762,8 @@ export function App() {
               <button onClick={() => { setSettingsOpen(true); setProfileMenu(null); }}><Gear size={17} /> {t("settings")} <small>Ctrl,</small></button>
               <button onClick={() => setProfileMenu(profileMenu === "language" ? "main" : "language")}><Globe size={17} /> {t("language")} <CaretDown className={profileMenu === "language" ? "submenu-caret open" : "submenu-caret"} size={14} /></button>
               {profileMenu === "language" && <div className="language-submenu">
-                <button onClick={() => { setLang("en"); setProfileMenu("main"); }}>{lang === "en" ? <Check size={15} weight="bold" /> : <span style={{width:15}} />} English</button>
-                <button onClick={() => { setLang("zh"); setProfileMenu("main"); }}>{lang === "zh" ? <Check size={15} weight="bold" /> : <span style={{width:15}} />} 中文（简体）</button>
+                <button onClick={() => { _lang = "en"; setLang("en"); setProfileMenu("main"); }}>{lang === "en" ? <Check size={15} weight="bold" /> : <span style={{width:15}} />} English</button>
+                <button onClick={() => { _lang = "zh"; setLang("zh"); setProfileMenu("main"); }}>{lang === "zh" ? <Check size={15} weight="bold" /> : <span style={{width:15}} />} 中文（简体）</button>
                 <span>{t("moreLanguagesSoon")}</span>
               </div>}
               <button className="disabled-menu-item" disabled><Cpu size={17} /> {t("thirdPartyModels")} <small>{t("comingSoon")}</small></button>
