@@ -973,16 +973,15 @@ function CodeDashboard({ range, setRange, statsView, setStatsView, stats, online
 }
 
 function CodeConversation({ conversation }) {
-  const scrollRef = useRef(null);
+  const bottomRef = useRef(null);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    bottomRef.current?.scrollIntoView({ behavior: "instant" });
   }, [conversation]);
 
   return <section className="code-conversation">
     <header><Monitor size={17} /><strong>{conversation.title}</strong><CaretDown size={14} /></header>
-    <div className="code-conversation-feed" ref={scrollRef}>
+    <div className="code-conversation-feed">
       {conversationTurns(conversation).map((turn, index) => {
         const thinking = turn.status === "thinking";
         return <div className="conversation-turn" key={`${index}-${turn.title}`}>
@@ -991,6 +990,7 @@ function CodeConversation({ conversation }) {
           <div className="assistant-answer"><DeepSeekWhale working={thinking} />{thinking ? <p className="thinking-copy">{t("deepseekInspecting")}</p> : <MarkdownText text={turn.response} />}</div>
         </div>;
       })}
+      <div ref={bottomRef} />
     </div>
   </section>;
 }
@@ -1030,17 +1030,16 @@ function DeepSeekWhale({ working = false }) {
 }
 
 function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePrompt, stopResponse, queuedPrompt, model, setModel, busy, enterToSend }) {
-  const scrollRef = useRef(null);
+  const bottomRef = useRef(null);
 
   useEffect(() => {
-    const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
+    bottomRef.current?.scrollIntoView({ behavior: "instant" });
   }, [conversation]);
 
   return <section className="work-conversation chat-only">
     <div className="conversation-main">
       <header className="conversation-title"><strong>{conversation.title}</strong><CaretDown size={16} /></header>
-      <div className="conversation-scroll" ref={scrollRef}>
+      <div className="conversation-scroll">
         <div className="conversation-feed">
           {conversationTurns(conversation).map((turn, index) => {
             const turnThinking = turn.status === "thinking";
@@ -1054,6 +1053,7 @@ function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePr
               </div>
             </div>
           })}
+          <div ref={bottomRef} />
         </div>
       </div>
       <div className="conversation-composer">
