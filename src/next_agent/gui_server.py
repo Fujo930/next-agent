@@ -51,12 +51,12 @@ def _safe_provider_error(exc: Exception) -> str:
     message = str(exc)
     lowered = message.lower()
     if "401" in message or "authentication" in lowered or "api key" in lowered:
-        return "DeepSeek authentication failed. Update DEEPSEEK_API_KEY or the workspace .api_key file."
+        return f"DeepSeek authentication failed. Update DEEPSEEK_API_KEY or the workspace .api_key file. [{message[:200]}]"
     if "429" in message or "rate limit" in lowered:
-        return "DeepSeek rate limit reached. Wait briefly, then try again."
+        return f"DeepSeek rate limit reached. Wait briefly, then try again. [{message[:200]}]"
     if "timeout" in lowered:
-        return "The DeepSeek request timed out. Check the network and try again."
-    return "NextAgent core could not complete the request. Check the core service logs."
+        return f"The DeepSeek request timed out. Check the network and try again. [{message[:200]}]"
+    return f"NextAgent core error: {message[:500]}"
 
 
 class SessionStore:
@@ -71,6 +71,7 @@ class SessionStore:
         )
         self.state = GUIStateDB(state_path or default_state_path)
         self.memory = MemoryManager()
+        self._dswork_agents: dict[str, Agent] = {}
         self._restore_code_sessions()
 
     def _new_agent(self, model: str, workdir: str) -> Agent:
@@ -257,30 +258,63 @@ class SessionStore:
             record["run_lock"].release()
 
     def chat(self, messages: list[dict[str, str]], model: str | None = None, session_id: str | None = None) -> dict[str, Any]:
-        """Run a plain DeepSeek conversation without Agent tools or workspace context."""
+        """Run a DeepSeek conversation with Agent (frozen prefix + tools + compression).
+
+        Each session_id gets a persistent Agent instance so the prefix cache
+        and tool schemas are frozen once and reused across turns.
+        """
         selected_model = model or "deepseek-v4-flash"
         clean_messages = [
             {"role": item.get("role", ""), "content": str(item.get("content", "")).strip()}
-            for item in messages[-80:]
+            for item in (messages or [])
             if item.get("role") in {"user", "assistant"} and str(item.get("content", "")).strip()
         ]
         if not clean_messages or clean_messages[-1]["role"] != "user":
             raise ValueError("A user message is required")
+
+        # Find or create a persistent Agent for this session
+        session_key = session_id or "__ephemeral"
+        agent = self._dswork_agents.get(session_key)
+
+        if agent is None:
+            # New session: create Agent; all messages are history
+            agent = self._new_agent(selected_model, self.default_workdir)
+            # Feed all but the last user message as history
+            for msg in clean_messages[:-1]:
+                agent.messages.append(msg)
+                if msg["role"] == "user":
+                    agent.turn_count += 1
+            self._dswork_agents[session_key] = agent
+        else:
+            # Existing session: agent.messages already has history
+            # Verify the last message matches what the GUI sent (avoid drift)
+            pass  # agent.chat() will append the new message
+
         try:
-            response = LLMAdapter(self.llm_config(selected_model, self.default_workdir)).chat(clean_messages)
-            self.state.add_usage(session_id, "dswork", selected_model, response.usage, getattr(response, "elapsed_ms", 0))
+            # Process the last user message through the Agent
+            last_msg = clean_messages[-1]["content"]
+            before_rounds = len(agent.cache_dash.rounds)
+            response_text = agent.chat(last_msg)
+            from dataclasses import asdict
+            for round_data in agent.cache_dash.rounds[before_rounds:]:
+                self.state.add_usage(
+                    session_id or session_key, "dswork",
+                    selected_model, asdict(round_data), round_data.elapsed_ms,
+                )
+
+            # Record conversation turns in state DB (same format as before)
             if session_id:
                 turns = []
                 pending = None
-                for item in clean_messages:
-                    if item["role"] == "user":
+                for msg in clean_messages:
+                    if msg["role"] == "user":
                         if pending:
                             turns.append(pending)
-                        pending = {"title": item["content"], "response": "", "status": "complete"}
+                        pending = {"title": msg["content"], "response": "", "status": "complete"}
                     elif pending:
-                        pending["response"] = item["content"]
+                        pending["response"] = msg["content"]
                 if pending:
-                    pending["response"] = response.content or ""
+                    pending["response"] = response_text
                     turns.append(pending)
                 first_title = turns[0]["title"] if turns else "Untitled task"
                 self.state.upsert_conversation({
@@ -290,7 +324,8 @@ class SessionStore:
                     "status": "Complete",
                     "conversation": {"title": first_title, "status": "complete", "turns": turns},
                 }, "dswork")
-            return {"response": response.content or "", "usage": response.usage, "model": response.model}
+
+            return {"response": response_text, "usage": {}, "model": selected_model}
         except Exception as exc:
             raise RuntimeError(_safe_provider_error(exc)) from exc
 
