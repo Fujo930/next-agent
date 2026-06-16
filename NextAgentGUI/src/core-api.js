@@ -23,10 +23,10 @@ export const coreApi = {
   createSession: (payload = {}) => request("/api/sessions", { method: "POST", body: JSON.stringify(payload) }),
   chat: (messages, model, sessionId, effort = "high") => request("/api/chat", {
     method: "POST",
-    body: JSON.stringify({ messages, model, session_id: sessionId, effort }),
+    body: JSON.stringify({ messages, model, session_id: sessionId, effort, auto_model: false }),
   }),
-  sendMessage: (sessionId, message) => request(`/api/sessions/${sessionId}/messages`, {
+  sendMessage: (sessionId, message, model, effort = "high") => request(`/api/sessions/${sessionId}/messages`, {
     method: "POST",
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, model, effort, auto_model: false }),
   }),
 };

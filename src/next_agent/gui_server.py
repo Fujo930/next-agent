@@ -130,7 +130,7 @@ class SessionStore:
 
     def _ensure_agent(self, record: dict[str, Any]) -> Agent:
         if record["agent"] is None:
-            agent = self._new_agent(record["model"], record["workdir"] or self.default_workdir)
+            agent = self._new_agent(record["model"], record["workdir"] or self.default_workdir, auto_model=False)
             conversation = record.get("conversation") or {}
             for turn in conversation.get("turns", []):
                 title = str(turn.get("title", "")).strip()
@@ -142,6 +142,15 @@ class SessionStore:
                     agent.messages.append({"role": "assistant", "content": response})
             record["agent"] = agent
         return record["agent"]
+
+    def _apply_runtime(self, agent: Agent, model: str | None, workdir: str, effort: str, auto_model: bool = False) -> None:
+        before_model = agent.config.model
+        agent.set_runtime_options(model=model, effort=effort, auto_model=auto_model)
+        if model and model != before_model:
+            agent.llm = LLMAdapter(self.llm_config(model, workdir))
+
+    def _trace(self, agent: Agent | None) -> list[dict[str, Any]]:
+        return list(getattr(agent, "last_trace", []) or [])
 
     def llm_config(self, model: str, workdir: str) -> LLMConfig:
         config = LLMConfig.from_env(model)
@@ -249,7 +258,14 @@ class SessionStore:
         with self._lock:
             return self._sessions.get(session_id)
 
-    def run_message(self, session_id: str, message: str) -> dict[str, Any]:
+    def run_message(
+        self,
+        session_id: str,
+        message: str,
+        model: str | None = None,
+        effort: str = "high",
+        auto_model: bool = False,
+    ) -> dict[str, Any]:
         record = self.get_record(session_id)
         if not record:
             raise KeyError("Session not found")
@@ -269,15 +285,20 @@ class SessionStore:
 
         try:
             agent = self._ensure_agent(record)
+            selected_model = model or record["model"]
+            selected_effort = (effort or "high").lower()
+            self._apply_runtime(agent, selected_model, record["workdir"] or self.default_workdir, selected_effort, auto_model=auto_model)
+            record["model"] = agent.config.model
             before_rounds = len(agent.cache_dash.rounds)
             response = agent.chat(message)
             for round_data in agent.cache_dash.rounds[before_rounds:]:
                 self.state.add_usage(record["id"], "code", record["model"], asdict(round_data), round_data.elapsed_ms)
             record["last_response"] = response
             record["status"] = "completed"
-            turns[-1] = {**turns[-1], "response": response, "status": "complete"}
+            trace = self._trace(agent)
+            turns[-1] = {**turns[-1], "response": response, "status": "complete", "trace": trace}
             record["conversation"] = {**record["conversation"], "status": "complete", "turns": turns}
-            return {"session": self.public(record), "response": response}
+            return {"session": self.public(record), "response": response, "trace": trace, "model": agent.config.model, "effort": agent.config.effort}
         except Exception as exc:
             record["status"] = "failed"
             record["error"] = _safe_provider_error(exc)
@@ -289,7 +310,7 @@ class SessionStore:
             self.state.upsert_conversation(record, "code")
             record["run_lock"].release()
 
-    def chat(self, messages: list[dict[str, str]], model: str | None = None, session_id: str | None = None, effort: str = "high", auto_model: bool = True) -> dict[str, Any]:
+    def chat(self, messages: list[dict[str, str]], model: str | None = None, session_id: str | None = None, effort: str = "high", auto_model: bool = False) -> dict[str, Any]:
         """Run a DeepSeek conversation with Agent (frozen prefix + tools + compression).
 
         Each session_id gets a persistent Agent instance so the prefix cache
@@ -320,7 +341,7 @@ class SessionStore:
         else:
             # Existing session: agent.messages already has history
             # Verify the last message matches what the GUI sent (avoid drift)
-            pass  # agent.chat() will append the new message
+            self._apply_runtime(agent, selected_model, self.default_workdir, effort, auto_model=auto_model)
 
         try:
             # Process the last user message through the Agent
@@ -357,7 +378,7 @@ class SessionStore:
                     "conversation": {"title": first_title, "status": "complete", "turns": turns},
                 }, "dswork")
 
-            return {"response": response_text, "usage": {}, "model": agent.config.model}
+            return {"response": response_text, "usage": {}, "model": agent.config.model, "effort": agent.config.effort, "trace": self._trace(agent)}
         except Exception as exc:
             raise RuntimeError(_safe_provider_error(exc)) from exc
 
@@ -505,7 +526,7 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
                     messages, body.get("model"),
                     str(body.get("session_id") or "") or None,
                     effort=str(body.get("effort", "high")).lower(),
-                    auto_model=body.get("auto_model", True),
+                    auto_model=body.get("auto_model", False),
                 )
                 self._send(HTTPStatus.OK, result)
                 return
@@ -536,7 +557,13 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
                     return
                 record = self.store.get_record(parts[2])
                 self.store.remember_user_message(message, record.get("workdir") if record else None)
-                result = self.store.run_message(parts[2], message)
+                result = self.store.run_message(
+                    parts[2],
+                    message,
+                    model=body.get("model"),
+                    effort=str(body.get("effort", "high")).lower(),
+                    auto_model=body.get("auto_model", False),
+                )
                 self._send(HTTPStatus.OK, result)
                 return
 

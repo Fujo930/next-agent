@@ -65,6 +65,12 @@ def _safe_json_dumps(obj: Any) -> str:
         return json.dumps({"error": f"JSON serialisation failed: {e}", "type": str(type(obj))}, ensure_ascii=False)
 
 
+def _trace_preview(value: Any, limit: int = 180) -> str:
+    text = _safe_json_dumps(value) if isinstance(value, (dict, list, tuple)) else str(value)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def _parse_allowed_tools(raw: str) -> dict[str, re.Pattern | None]:
     """Parse 'allowed-tools' spec into a filter dict.
 
@@ -285,6 +291,7 @@ class Agent:
         self.turn_count = 0
         self._prefix_built = False
         self._active_command: dict | None = None
+        self.last_trace: list[dict[str, Any]] = []
 
     # ── Public API ──────────────────────────────────────────
 
@@ -310,11 +317,38 @@ class Agent:
         """
         return self._run_loop(user_input)
 
+    def set_runtime_options(
+        self,
+        model: str | None = None,
+        effort: str | None = None,
+        auto_model: bool | None = None,
+    ) -> None:
+        """Apply GUI runtime choices to an existing session."""
+        selected_model = (model or "").strip()
+        if selected_model and selected_model != self.config.model:
+            self.config.model = selected_model
+            self.llm = LLMAdapter(LLMConfig.from_env(selected_model))
+            self.cache_dash = CacheDashboard(model=selected_model)
+            self.prefix = PrefixManager()
+            self._prefix_built = False
+        if effort:
+            self.config.effort = effort.lower()
+        if auto_model is not None:
+            self.config.auto_model = bool(auto_model)
+
     # ── Internal: agent loop ───────────────────────────────
 
     def _run_loop(self, user_input: str) -> str:
         """Core agent loop."""
         self.turn_count += 1
+        self.last_trace = [{
+            "type": "stage",
+            "label": "Request received",
+            "detail": _trace_preview(user_input),
+            "status": "complete",
+            "model": self.config.model,
+            "effort": self.config.effort,
+        }]
 
         # ── E: Language routing ──
         lang_extension = ""
@@ -339,8 +373,20 @@ class Agent:
                 self.cache_dash = CacheDashboard(model=selection.model)
                 # Note reason for cost analysis
                 self._model_switch_reason = selection.reasons
+                self.last_trace.append({
+                    "type": "stage",
+                    "label": "Model router",
+                    "detail": f"{old_model} -> {selection.model}: {'; '.join(selection.reasons)}",
+                    "status": "complete",
+                })
             else:
                 self._model_switch_reason = selection.reasons
+                self.last_trace.append({
+                    "type": "stage",
+                    "label": "Model router",
+                    "detail": f"Kept {selection.model}: {'; '.join(selection.reasons)}",
+                    "status": "complete",
+                })
 
         # Apply effort level → temperature/max_tokens
         effort_map = {
@@ -353,6 +399,12 @@ class Agent:
         # Store on instance so _do_llm_call can use them
         self._effort_temperature = eff_temp
         self._effort_max_tokens = eff_tokens
+        self.last_trace.append({
+            "type": "stage",
+            "label": "Effort applied",
+            "detail": f"{self.config.effort}: temperature {eff_temp}, max tokens {eff_tokens}",
+            "status": "complete",
+        })
 
         # ── Command resolution ──
         cmd, resolved_input = self.commands.resolve(user_input)
@@ -393,6 +445,12 @@ class Agent:
         # ── Build prefix (once per session) ──
         if not self._prefix_built:
             self._build_prefix(lang_extension, user_input=user_prompt)
+            self.last_trace.append({
+                "type": "stage",
+                "label": "Workspace context prepared",
+                "detail": f"Prefix and tools loaded for {self.config.workdir}",
+                "status": "complete",
+            })
 
         # ── Append user message ──
         self._append_message({"role": "user", "content": user_prompt})
@@ -530,6 +588,12 @@ class Agent:
                 if self.config.enable_cache_dash:
                     cache_summary = self.cache_dash.format_round()
                     output += f"\n\n{cache_summary}"
+                self.last_trace.append({
+                    "type": "stage",
+                    "label": "Response ready",
+                    "detail": f"{len(output)} characters returned",
+                    "status": "complete",
+                })
                 return output
 
         # Max rounds reached
@@ -542,6 +606,13 @@ class Agent:
 
     def _execute_tool(self, tc: ToolCall) -> dict:
         """Execute a tool call with full validation pipeline."""
+        trace_event = {
+            "type": "tool",
+            "name": tc.name,
+            "arguments": _trace_preview(tc.arguments),
+            "status": "running",
+        }
+        self.last_trace.append(trace_event)
 
         # ── B: Pre-validation ──
         if self.config.enable_validation:
@@ -549,11 +620,17 @@ class Agent:
                 tc.name, _safe_json_dumps(tc.arguments)
             )
             if validation.action == "cached":
-                return validation.cached_result or {"ok": True, "output": "[cached]"}
+                result = validation.cached_result or {"ok": True, "output": "[cached]"}
+                trace_event.update({"status": "cached", "result": _trace_preview(result)})
+                return result
             if validation.action == "block":
-                return {"ok": False, "error": validation.error}
+                result = {"ok": False, "error": validation.error}
+                trace_event.update({"status": "blocked", "result": _trace_preview(result)})
+                return result
             if validation.action == "retry":
-                return {"ok": False, "error": f"Validation failed: {validation.error}"}
+                result = {"ok": False, "error": f"Validation failed: {validation.error}"}
+                trace_event.update({"status": "failed", "result": _trace_preview(result)})
+                return result
             args = validation.args
         else:
             args = tc.arguments
@@ -571,7 +648,11 @@ class Agent:
                 self.cross_file.before_edits([path])
 
         # ── Execute ──
-        result = tool_dispatch(tc.name, args)
+        try:
+            result = tool_dispatch(tc.name, args)
+        except Exception as exc:
+            trace_event.update({"status": "failed", "result": _trace_preview(exc)})
+            raise
 
         # ── Secret redaction ──
         if self.config.enable_redaction:
@@ -620,6 +701,10 @@ class Agent:
                     else:
                         result["error"] = (result.get("error", "") + issue_text)
 
+        trace_event.update({
+            "status": "complete" if result.get("ok", True) else "failed",
+            "result": _trace_preview(result),
+        })
         return result
 
     # ── Internal: prefix building ─────────────────────────────

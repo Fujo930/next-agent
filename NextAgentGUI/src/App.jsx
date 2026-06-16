@@ -142,20 +142,20 @@ function conversationTurns(conversation) {
   return [{ title: conversation.title, response: conversation.response, status: conversation.status }];
 }
 
-function startConversation(conversation, title) {
+function startConversation(conversation, title, mode = "dswork") {
   return {
     title: conversation?.title || title,
     status: "thinking",
-    turns: [...conversationTurns(conversation), { title, response: "", status: "thinking" }],
+    turns: [...conversationTurns(conversation), { title, response: "", status: "thinking", mode, trace: [] }],
   };
 }
 
-function finishConversation(conversation, response, status = "complete") {
+function finishConversation(conversation, response, status = "complete", trace = []) {
   const turns = conversationTurns(conversation);
   return {
     ...conversation,
     status,
-    turns: turns.map((turn, index) => index === turns.length - 1 ? { ...turn, response, status } : turn),
+    turns: turns.map((turn, index) => index === turns.length - 1 ? { ...turn, response, status, trace } : turn),
   };
 }
 
@@ -165,6 +165,40 @@ function chatMessages(conversation) {
     if (turn.response && turn.status !== "thinking") messages.push({ role: "assistant", content: turn.response });
     return messages;
   });
+}
+
+function traceLabel(event) {
+  if (!event) return "";
+  if (event.type === "tool") return event.name || t("toolCall");
+  return event.label || t("thinkingStage");
+}
+
+function dsworkThoughts(turn, thinking) {
+  if (thinking) {
+    return [
+      t("stageUnderstanding"),
+      t("stageContext"),
+      t("stageComposing"),
+    ];
+  }
+  const trace = Array.isArray(turn.trace) ? turn.trace : [];
+  const stages = trace.filter((event) => event.type !== "tool").slice(0, 3).map(traceLabel);
+  return stages.length ? stages : [
+    t("stageUnderstanding"),
+    t("stageContext"),
+    t("stageResponse"),
+  ];
+}
+
+function codeTraceItems(turn, thinking) {
+  const trace = Array.isArray(turn.trace) ? turn.trace : [];
+  if (thinking && !trace.length) {
+    return [{ type: "stage", label: t("traceRunning"), detail: t("deepseekInspecting"), status: "running" }];
+  }
+  if (!trace.length) {
+    return [{ type: "stage", label: t("traceNoTools"), detail: t("traceNoToolsDesc"), status: "complete" }];
+  }
+  return trace;
 }
 
 export function App() {
@@ -459,7 +493,7 @@ export function App() {
     setNewItemActive(false);
     if (isCode) {
       let sessionId = activeId;
-      const thinkingConversation = startConversation(activeCodeSession?.conversation, title);
+      const thinkingConversation = startConversation(activeCodeSession?.conversation, title, "code");
       try {
         setCoreBusy(true);
         setCoreError("");
@@ -476,16 +510,18 @@ export function App() {
           status: "running",
           conversation: thinkingConversation,
         } : item));
-        const result = await coreApi.sendMessage(sessionId, title);
+        const result = await coreApi.sendMessage(sessionId, title, model, effort);
         if (generation !== requestGeneration.current) return;
         const response = cleanAgentResponse(result.response);
+        if (result.model) setModel(result.model);
+        if (result.effort) setEffort(result.effort.charAt(0).toUpperCase() + result.effort.slice(1));
         setCoreResponse(response);
         setSessions((current) => current.map((item) => item.id === sessionId ? {
           ...sessionFromCore(result.session),
           title: item.title,
           pinned: item.pinned,
           done: item.done,
-          conversation: finishConversation(thinkingConversation, response),
+          conversation: finishConversation(thinkingConversation, response, "complete", result.trace || []),
         } : item));
         const stats = await coreApi.stats();
         setCoreStats(stats);
@@ -497,14 +533,14 @@ export function App() {
           ...item,
           meta: t("failed"),
           status: "failed",
-          conversation: finishConversation(thinkingConversation, error.message, "failed"),
+          conversation: finishConversation(thinkingConversation, error.message, "failed", [{ type: "stage", label: t("taskFailed"), detail: error.message, status: "failed" }]),
         } : item));
       } finally {
         if (generation === requestGeneration.current) setCoreBusy(false);
       }
     } else {
       let taskId = newItemActive ? null : activeWorkItem?.id;
-      const thinkingConversation = startConversation(newItemActive ? null : activeWorkItem?.conversation, title);
+      const thinkingConversation = startConversation(newItemActive ? null : activeWorkItem?.conversation, title, "dswork");
       if (!taskId) {
         taskId = `ds-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
         setActiveId(taskId);
@@ -528,10 +564,12 @@ export function App() {
         setCoreError("");
         const result = await coreApi.chat(chatMessages(thinkingConversation), model, taskId, effort);
         if (generation !== requestGeneration.current) return;
+        if (result.model) setModel(result.model);
+        if (result.effort) setEffort(result.effort.charAt(0).toUpperCase() + result.effort.slice(1));
         setWorkItems((current) => current.map((item) => item.id === taskId ? {
           ...item,
           meta: t("complete"),
-          conversation: finishConversation(thinkingConversation, cleanAgentResponse(result.response)),
+          conversation: finishConversation(thinkingConversation, cleanAgentResponse(result.response), "complete", result.trace || []),
         } : item));
         const stats = await coreApi.stats();
         setCoreStats(stats);
@@ -542,7 +580,7 @@ export function App() {
         setWorkItems((current) => current.map((item) => item.id === taskId ? {
           ...item,
           meta: t("failed"),
-          conversation: finishConversation(thinkingConversation, error.message, "failed"),
+          conversation: finishConversation(thinkingConversation, error.message, "failed", [{ type: "stage", label: t("taskFailed"), detail: error.message, status: "failed" }]),
         } : item));
       } finally {
         if (generation === requestGeneration.current) setCoreBusy(false);
@@ -675,7 +713,7 @@ export function App() {
         <span className={`session-dot ${session.done ? "done" : ""}`}>{session.done && <Check size={12} weight="bold" />}</span>
         <span className="session-copy"><strong>{session.title}</strong>{settings.showRecentDetails && <small>{session.meta}</small>}</span>
       </button>
-      <button className="recent-more" aria-label={`More actions for ${session.title}`} onClick={(event) => {
+      <button className="recent-more" aria-label={`${t("moreActions")} ${session.title}`} onClick={(event) => {
         event.stopPropagation();
         setRecentMenu(recentMenu === session.id ? null : session.id);
       }}><DotsThreeVertical size={17} weight="bold" /></button>
@@ -814,10 +852,13 @@ export function App() {
                 <button onClick={chooseCodeFolder} aria-label={t("addFolderToSession")}><Folder size={15} /><Plus size={11} /></button>
               </div>
               <div className="composer compact-composer">
+                <DeepSeekWhale className="composer-whale" swimming working={coreBusy} />
                 <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => {
                   if (settings.enterToSend && event.key === "Enter" && !event.shiftKey) { event.preventDefault(); sendPrompt(); }
                 }} placeholder={t("describeTask")} />
-                <button className="send" disabled={!prompt.trim() || coreBusy} onClick={sendPrompt} aria-label={t("sendTask")}><ArrowUp size={17} weight="bold" /></button>
+                {coreBusy
+                  ? <button className="send code-stop" onClick={stopResponse} aria-label={t("stopResponse")}><span /></button>
+                  : <button className="send" disabled={!prompt.trim()} onClick={sendPrompt} aria-label={t("sendTask")}><ArrowUp size={17} weight="bold" /></button>}
               </div>
               {prompt.startsWith("/") && <SlashCommandMenu commands={filteredSlashCommands} onSelect={(command) => setPrompt(`/${command} `)} />}
               <div className="composer-footer">
@@ -831,7 +872,7 @@ export function App() {
                   <button onClick={() => { setDirectoryModal("Connectors"); setCodeMenu(null); }}><SquaresFour size={16} /> {t("addConnectors")}</button>
                   <button onClick={() => { setDirectoryModal("Plugins"); setCodeMenu(null); }}><Plug size={16} /> {t("addPlugins")}</button>
                 </div>}
-                <span className="shortcut">{t("enterToSend")}</span>
+                <span className="shortcut">{t("enterToSendHint")}</span>
                 <Select value={model} setValue={setModel} options={["deepseek-v4-flash", "deepseek-v4-pro"]} />
                 <EffortMenu value={effort} setValue={setEffort} />
               </div>
@@ -984,20 +1025,25 @@ function CodeDashboard({ range, setRange, statsView, setStatsView, stats, online
 function CodeConversation({ conversation }) {
   const scrollRef = useRef(null);
   const turns = conversationTurns(conversation);
+  const lastTurn = turns[turns.length - 1];
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [turns.length, turns[turns.length - 1]?.response]);
+    if (!el) return undefined;
+    const scroll = () => { el.scrollTop = el.scrollHeight; };
+    scroll();
+    const frame = requestAnimationFrame(() => requestAnimationFrame(scroll));
+    return () => cancelAnimationFrame(frame);
+  }, [turns.length, lastTurn?.response, lastTurn?.status]);
 
-  return <section className="code-conversation">
+  return <section className="code-conversation" ref={scrollRef}>
     <header><Monitor size={17} /><strong>{conversation.title}</strong><CaretDown size={14} /></header>
-    <div className="code-conversation-feed" ref={scrollRef}>
+    <div className="code-conversation-feed">
       {turns.map((turn, index) => {
         const thinking = turn.status === "thinking";
         return <div className="conversation-turn" key={`${index}-${turn.title}`}>
           <div className="user-message">{turn.title}</div>
-          <div className="thought-label">{thinking ? t("working") : turn.status === "failed" ? t("taskFailed") : t("completed")} <CaretDown size={14} /></div>
+          <ThoughtPanel variant="code" turn={turn} thinking={thinking} />
           <div className="assistant-answer"><DeepSeekWhale working={thinking} />{thinking ? <p className="thinking-copy">{t("deepseekInspecting")}</p> : <MarkdownText text={turn.response} />}</div>
         </div>;
       })}
@@ -1033,20 +1079,27 @@ function WorkDashboard({ prompt, setPrompt, sendPrompt, queuePrompt, stopRespons
   );
 }
 
-function DeepSeekWhale({ working = false }) {
-  return <span className={`deepseek-whale ${working ? "working" : ""}`} aria-label="DeepSeek">
-    <span className="whale-body"><i /><b /></span><span className="whale-wave" />
+function DeepSeekWhale({ working = false, swimming = false, className = "" }) {
+  return <span className={`deepseek-whale ${working ? "working" : ""} ${swimming ? "swimming" : ""} ${className}`} aria-label="DeepSeek" aria-hidden="true">
+    <img src="/deepseek-whale.svg" alt="" />
+    <span className="whale-bubble bubble-one" />
+    <span className="whale-bubble bubble-two" />
   </span>;
 }
 
 function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePrompt, stopResponse, queuedPrompt, model, setModel, busy, enterToSend }) {
   const scrollRef = useRef(null);
   const turns = conversationTurns(conversation);
+  const lastTurn = turns[turns.length - 1];
 
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [turns.length, turns[turns.length - 1]?.response]);
+    if (!el) return undefined;
+    const scroll = () => { el.scrollTop = el.scrollHeight; };
+    scroll();
+    const frame = requestAnimationFrame(() => requestAnimationFrame(scroll));
+    return () => cancelAnimationFrame(frame);
+  }, [turns.length, lastTurn?.response, lastTurn?.status]);
 
   return <section className="work-conversation chat-only">
     <div className="conversation-main">
@@ -1058,6 +1111,7 @@ function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePr
             return <div className="conversation-turn" key={`${index}-${turn.title}`}>
               <div className="user-message">{turn.title}</div>
               <div className="assistant-turn">
+                <ThoughtPanel variant="work" turn={turn} thinking={turnThinking} />
                 <div className="assistant-answer">
                   <DeepSeekWhale working={turnThinking} />
                   {turnThinking ? <p className="thinking-copy">{t("thinking")}</p> : <MarkdownText text={turn.response} />}
@@ -1079,6 +1133,36 @@ function WorkConversation({ conversation, prompt, setPrompt, sendPrompt, queuePr
       </div>
     </div>
   </section>;
+}
+
+function ThoughtPanel({ variant, turn, thinking }) {
+  const isCodeTrace = variant === "code";
+  const title = thinking ? (isCodeTrace ? t("working") : t("thinking")) : turn.status === "failed" ? t("taskFailed") : t("completed");
+  if (!isCodeTrace) {
+    return <details className="thought-panel thought-panel-compact">
+      <summary>{title}<CaretDown size={14} /></summary>
+      <div className="thought-steps">
+        {dsworkThoughts(turn, thinking).map((step, index) => <span key={`${step}-${index}`}><Check size={13} /> {step}</span>)}
+      </div>
+    </details>;
+  }
+  const items = codeTraceItems(turn, thinking);
+  return <details className="thought-panel thought-panel-code">
+    <summary>{title}<CaretDown size={14} /></summary>
+    <div className="trace-list">
+      {items.map((event, index) => (
+        <div className={`trace-item ${event.type === "tool" ? "tool-event" : "stage-event"} ${event.status || ""}`} key={`${traceLabel(event)}-${index}`}>
+          <span className="trace-dot">{event.type === "tool" ? <Wrench size={13} /> : <Check size={12} />}</span>
+          <div>
+            <strong>{event.type === "tool" ? t("traceTool", event.name || t("toolCall")) : traceLabel(event)}</strong>
+            {event.detail && <p>{event.detail}</p>}
+            {event.arguments && <code>{event.arguments}</code>}
+            {event.result && <small>{event.result}</small>}
+          </div>
+        </div>
+      ))}
+    </div>
+  </details>;
 }
 
 function MarkdownText({ text = "" }) {
@@ -1127,6 +1211,10 @@ function EffortMenu({ value, setValue }) {
   const [open, setOpen] = useState(false);
   const levels = ["Low", "Medium", "High", "Max"];
   const [position, setPosition] = useState(Math.max(0, levels.indexOf(value)));
+  useEffect(() => {
+    const next = levels.indexOf(value);
+    if (next >= 0) setPosition(next);
+  }, [value]);
   const activeLevel = levels[Math.round(position)];
   const pixelProgress = Math.max(0, Math.min(1, position - 2));
   const pixelRightEdge = (2 + pixelProgress) / 3;
@@ -1217,6 +1305,7 @@ function Select({ value, setValue, options, className = "" }) {
 function DirectoryModal({ initialSection, close }) {
   const [section, setSection] = useState(initialSection);
   const [search, setSearch] = useState("");
+  const sectionLabel = section === "Plugins" ? t("plugins") : t("connectors");
   return <div className="directory-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}>
     <section className="directory-modal">
       <header><h2>{t("directory")}</h2><button aria-label={t("closeDirectory")} onClick={close}><X size={16} /></button></header>
@@ -1225,10 +1314,10 @@ function DirectoryModal({ initialSection, close }) {
           <button className={section === "Plugins" ? "selected" : ""} onClick={() => setSection("Plugins")}><Plug size={15} /> {t("plugins")}</button>
           <button className={section === "Connectors" ? "selected" : ""} onClick={() => setSection("Connectors")}><SquaresFour size={15} /> {t("connectors")}</button>
         </nav>
-        <label><MagnifyingGlass size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={`Search ${section.toLowerCase()}...`} /></label>
+        <label><MagnifyingGlass size={15} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("searchSection", sectionLabel)} /></label>
       </div>
       <div className="directory-empty">
-        <strong>{search ? t("noMatch", section.toLowerCase(), search) : t("notAvailable", section.toLowerCase())}</strong>
+        <strong>{search ? t("noMatch", sectionLabel, search) : t("notAvailable", sectionLabel)}</strong>
         <p>{section === "Plugins" ? t("pluginsDesc") : t("connectorsDesc")}</p>
       </div>
     </section>
@@ -1236,7 +1325,7 @@ function DirectoryModal({ initialSection, close }) {
 }
 
 function PageHeader({ title, description, action, onAction, sort, onSort }) {
-  return <div className="page-header"><div><h1>{title}</h1>{description && <p>{description}</p>}</div><div className="page-actions">{sort && <button className="sort-button" onClick={onSort}>Sort by <strong>{sort}</strong><CaretDown size={15} /></button>}<button className="primary-button" onClick={onAction}>{action}<Plus size={15} /></button></div></div>;
+  return <div className="page-header"><div><h1>{title}</h1>{description && <p>{description}</p>}</div><div className="page-actions">{sort && <button className="sort-button" onClick={onSort}>{t("sortBy")} <strong>{sort}</strong><CaretDown size={15} /></button>}<button className="primary-button" onClick={onAction}>{action}<Plus size={15} /></button></div></div>;
 }
 
 function SearchBar({ placeholder, value, setValue }) {
@@ -1249,26 +1338,31 @@ function ProjectsPage({ projects, setProjects, openModal, openPath, setWorkPage,
   const visible = projects.filter((item) => item.name.toLowerCase().includes(search.toLowerCase())).sort((a, b) => ascending ? a.name.localeCompare(b.name) : b.id - a.id);
   const remove = (id) => setProjects((current) => current.filter((item) => item.id !== id));
   const start = (item) => { setSelectedWorkdir(item.path); setWorkPage("Home"); };
-  return <section className="feature-page"><PageHeader title={t("projects")} action={t("newProject")} sort={ascending ? "Name" : "Recent activity"} onSort={() => setAscending(!ascending)} onAction={() => openModal("project")} /><SearchBar placeholder={t("searchProjects")} value={search} setValue={setSearch} />{projects.length ? <ItemGrid items={visible} icon={Folder} emptyLabel="No matching projects" actions={(item) => <><button onClick={() => start(item)}>{t("newTask")}</button><button onClick={() => openPath(item.path)}>{t("openFolder")}</button><button className="danger" onClick={() => remove(item.id)}>{t("delete")}</button></>} /> : <EmptyState icon={SquaresFour} title="Looking to start a project?" body="Give NextAgent a folder you already work from" action={t("newProject")} onAction={() => openModal("project")} />}</section>;
+  return <section className="feature-page"><PageHeader title={t("projects")} action={t("newProject")} sort={ascending ? t("name") : t("recentActivity")} onSort={() => setAscending(!ascending)} onAction={() => openModal("project")} /><SearchBar placeholder={t("searchProjects")} value={search} setValue={setSearch} />{projects.length ? <ItemGrid items={visible} icon={Folder} emptyLabel={t("noMatchingProjects")} actions={(item) => <><button onClick={() => start(item)}>{t("newTask")}</button><button onClick={() => openPath(item.path)}>{t("openFolder")}</button><button className="danger" onClick={() => remove(item.id)}>{t("delete")}</button></>} /> : <EmptyState icon={SquaresFour} title={t("startProjectTitle")} body={t("startProjectBody")} action={t("newProject")} onAction={() => openModal("project")} />}</section>;
 }
 
 function ScheduledPage({ scheduled, setScheduled, keepAwake, setKeepAwake, openModal, showNotice }) {
   const [search, setSearch] = useState("");
   const [ascending, setAscending] = useState(false);
-  function addTemplate(name) { setScheduled((current) => [{ id: Date.now(), name, prompt: name, schedule: name === "Daily brief" ? "Daily at 9:00 AM" : "Fridays at 4:00 PM", enabled: true, lastRun: "", meta: name === "Daily brief" ? "Daily at 9:00 AM" : "Fridays at 4:00 PM" }, ...current]); }
+  function addTemplate(kind) {
+    const daily = kind === "daily";
+    const name = daily ? t("dailyBrief") : t("weeklyReview");
+    const schedule = daily ? "Daily at 9:00 AM" : "Fridays at 4:00 PM";
+    setScheduled((current) => [{ id: Date.now(), name, prompt: name, schedule, enabled: true, lastRun: "", meta: schedule }, ...current]);
+  }
   function update(id, changes) { setScheduled((current) => current.map((item) => item.id === id ? { ...item, ...changes } : item)); }
   async function run(item) {
-    update(item.id, { meta: "Running now..." });
+    update(item.id, { meta: t("runningNow") });
     try {
       await coreApi.chat([{ role: "user", content: item.prompt || item.name }], "deepseek-v4-flash", `scheduled-${item.id}`);
-      update(item.id, { lastRun: new Date().toLocaleString(), meta: `Last ran ${new Date().toLocaleTimeString()}` });
-      showNotice(`Ran "${item.name}" with DeepSeek.`);
+      update(item.id, { lastRun: new Date().toLocaleString(), meta: t("lastRan", new Date().toLocaleTimeString()) });
+      showNotice(t("runNotice", item.name));
     } catch (error) {
-      update(item.id, { meta: `Failed: ${error.message}` });
+      update(item.id, { meta: t("failedWith", error.message) });
     }
   }
   const visible = scheduled.filter((item) => item.name.toLowerCase().includes(search.toLowerCase())).sort((a, b) => ascending ? a.name.localeCompare(b.name) : b.id - a.id);
-  return <section className="feature-page"><PageHeader title={t("scheduled")} description={<>Run tasks on a schedule or whenever you need them. Type <code>/schedule</code> in any existing task to set one up.</>} action={t("newTask")} sort={ascending ? "Name" : "Next run"} onSort={() => setAscending(!ascending)} onAction={() => openModal("scheduled")} /><SearchBar placeholder={t("searchScheduledTasks")} value={search} setValue={setSearch} /><div className="awake-banner"><span><Info size={18} /> Scheduled tasks only run while your computer is awake.</span><button className={`toggle ${keepAwake ? "on" : ""}`} onClick={() => setKeepAwake(!keepAwake)}><Sun size={18} /> Keep awake <i /></button></div>{scheduled.length ? <ItemGrid items={visible} icon={CalendarBlank} emptyLabel="No matching scheduled tasks" status={(item) => item.enabled ? "Enabled" : "Paused"} actions={(item) => <><button onClick={() => run(item)}>{t("runNow")}</button><button onClick={() => update(item.id, { enabled: !item.enabled })}>{item.enabled ? t("pause") : t("enable")}</button><button className="danger" onClick={() => setScheduled((current) => current.filter((entry) => entry.id !== item.id))}>{t("delete")}</button></>} /> : <EmptyState icon={Timer} title="Create your first scheduled task" actions={<><button onClick={() => addTemplate(t("dailyBrief"))}><Coffee size={18} /> {t("dailyBrief")}</button><button onClick={() => addTemplate(t("weeklyReview"))}><Check size={18} /> {t("weeklyReview")}</button></>} />}</section>;
+  return <section className="feature-page"><PageHeader title={t("scheduled")} description={<><span>{t("scheduledDesc").split("/schedule")[0]}</span><code>/schedule</code><span>{t("scheduledDesc").split("/schedule")[1]}</span></>} action={t("newTask")} sort={ascending ? t("name") : t("nextRun")} onSort={() => setAscending(!ascending)} onAction={() => openModal("scheduled")} /><SearchBar placeholder={t("searchScheduledTasks")} value={search} setValue={setSearch} /><div className="awake-banner"><span><Info size={18} /> {t("awakeOnly")}</span><button className={`toggle ${keepAwake ? "on" : ""}`} onClick={() => setKeepAwake(!keepAwake)}><Sun size={18} /> {t("keepAwake")} <i /></button></div>{scheduled.length ? <ItemGrid items={visible} icon={CalendarBlank} emptyLabel={t("noMatchingScheduledTasks")} status={(item) => item.enabled ? t("enabled") : t("paused")} actions={(item) => <><button onClick={() => run(item)}>{t("runNow")}</button><button onClick={() => update(item.id, { enabled: !item.enabled })}>{item.enabled ? t("pause") : t("enable")}</button><button className="danger" onClick={() => setScheduled((current) => current.filter((entry) => entry.id !== item.id))}>{t("delete")}</button></>} /> : <EmptyState icon={Timer} title={t("createFirst", t("scheduledLabel"))} actions={<><button onClick={() => addTemplate("daily")}><Coffee size={18} /> {t("dailyBrief")}</button><button onClick={() => addTemplate("weekly")}><Check size={18} /> {t("weeklyReview")}</button></>} />}</section>;
 }
 
 function ArtifactsPage({ artifacts, setArtifacts, openModal }) {
@@ -1277,17 +1371,18 @@ function ArtifactsPage({ artifacts, setArtifacts, openModal }) {
   function refresh(item) {
     setArtifacts((current) => current.map((entry) => entry.id === item.id ? { ...entry, versions: [...(entry.versions || []), entry.html], updatedAt: Date.now(), meta: "Live · Updated just now" } : entry));
   }
-  return <section className="feature-page"><PageHeader title={t("liveArtifacts")} description={<>Create dynamic artifacts that stay up-to-date using live data from <u>your connectors</u>.</>} action={t("newArtifact")} onAction={() => openModal("artifact")} />{artifacts.length ? <ItemGrid items={artifacts} icon={Broadcast} actions={(item) => <><button onClick={() => setActive(item)}>Open live view</button><button onClick={() => refresh(item)}>Refresh</button><button className="danger" onClick={() => remove(item.id)}>{t("delete")}</button></>} /> : <EmptyState icon={Package} title="Create your first artifact" action="What needs my attention" onAction={() => openModal("artifact")} />}{active && <ArtifactModal artifact={artifacts.find((item) => item.id === active.id) || active} close={() => setActive(null)} save={(html) => setArtifacts((current) => current.map((item) => item.id === active.id ? { ...item, versions: [...(item.versions || []), item.html], html, updatedAt: Date.now(), meta: "Live · Updated just now" } : item))} />}</section>;
+  return <section className="feature-page"><PageHeader title={t("liveArtifacts")} description={t("liveArtifactsDesc")} action={t("newArtifact")} onAction={() => openModal("artifact")} />{artifacts.length ? <ItemGrid items={artifacts} icon={Broadcast} emptyLabel={t("noMatchingArtifacts")} actions={(item) => <><button onClick={() => setActive(item)}>{t("openLiveView")}</button><button onClick={() => refresh(item)}>{t("refresh")}</button><button className="danger" onClick={() => remove(item.id)}>{t("delete")}</button></>} /> : <EmptyState icon={Package} title={t("createFirstArtifact")} action={t("whatNeedsAttention")} onAction={() => openModal("artifact")} />}{active && <ArtifactModal artifact={artifacts.find((item) => item.id === active.id) || active} close={() => setActive(null)} save={(html) => setArtifacts((current) => current.map((item) => item.id === active.id ? { ...item, versions: [...(item.versions || []), item.html], html, updatedAt: Date.now(), meta: "Live · Updated just now" } : item))} />}</section>;
 }
 
 function CustomizePage({ onClose, navOpen, skills, setSkills, connectors, setConnectors, plugins, setPlugins, showNotice }) {
   const [section, setSection] = useState("Overview");
   const [editor, setEditor] = useState(null);
   const catalog = ["GitHub workflow", "Release notes", "Frontend polish", "Research assistant"];
+  const sectionLabels = { Overview: t("customize"), Skills: t("skills"), Connectors: t("connectors"), Plugins: t("plugins") };
   function togglePlugin(name) {
     setPlugins((current) => current.some((item) => item.name === name) ? current.filter((item) => item.name !== name) : [...current, { id: Date.now(), name, installed: true }]);
   }
-  return <section className={`customize-page ${navOpen ? "" : "nav-closed"}`}><aside className="customize-nav"><button onClick={onClose}><ArrowLeft size={16} /> {t("backToWorkspace")}</button><button className={section === "Skills" ? "current" : ""} onClick={() => setSection("Skills")}><Package size={18} /> {t("skills")}</button><button className={section === "Connectors" ? "current" : ""} onClick={() => setSection("Connectors")}><SquaresFour size={18} /> {t("connectors")}</button><div><span>{t("personalPlugins")}</span><button onClick={() => setSection("Plugins")}><Plus size={18} /></button></div><p>{t("giveExpertise")}</p><button className="outline-button" onClick={() => setSection("Plugins")}>{t("browsePlugins")}</button></aside><div className={`customize-main ${section !== "Overview" ? "directory-view" : ""}`}><Wrench size={section === "Overview" ? 72 : 42} /><h1>{section === "Overview" ? t("customizeNextAgent") : section}</h1><p>{t("customizeDesc")}</p>{section === "Overview" ? <div className="customize-cards"><button onClick={() => setSection("Connectors")}><SquaresFour size={22} /><span><strong>{t("connectApps")}</strong><small>{t("connectAppsDesc")}</small></span></button><button onClick={() => setEditor("skill")}><Package size={22} /><span><strong>{t("createSkills")}</strong><small>{t("createSkillsDesc")}</small></span></button><button onClick={() => setSection("Plugins")}><Plug size={22} /><span><strong>{t("browsePlugins")}</strong><small>{t("browsePluginsDesc")}</small></span></button></div> : <div className="customize-directory"><div className="directory-heading"><strong>{section}</strong><button className="primary-button" onClick={() => section === "Skills" ? setEditor("skill") : section === "Connectors" ? setEditor("connector") : togglePlugin("Custom plugin")}><Plus size={15} /> {t("add", section)}</button></div>{section === "Skills" && skills.map((item) => <DirectoryRow key={item.name} title={item.name} description={item.description || item.trigger || "Local NextAgent skill"} />)}{section === "Connectors" && connectors.map((item) => <DirectoryRow key={item.id} title={item.name} description={item.url} enabled={item.enabled !== false} toggle={() => setConnectors((current) => current.map((entry) => entry.id === item.id ? { ...entry, enabled: entry.enabled === false } : entry))} remove={() => setConnectors((current) => current.filter((entry) => entry.id !== item.id))} />)}{section === "Plugins" && catalog.map((name) => <DirectoryRow key={name} title={name} description="Local role-level expertise for NextAgent" enabled={plugins.some((item) => item.name === name)} toggle={() => togglePlugin(name)} />)}{((section === "Skills" && !skills.length) || (section === "Connectors" && !connectors.length)) && <div className="filtered-empty">No {section.toLowerCase()} yet.</div>}</div>}</div>{editor && <CustomizeEditor type={editor} close={() => setEditor(null)} save={async (payload) => { if (editor === "skill") { const result = await coreApi.createSkill(payload); setSkills((current) => [...current, result.skill]); showNotice(`Created skill "${payload.name}".`); } else { setConnectors((current) => [...current, { id: Date.now(), enabled: true, ...payload }]); showNotice(`Connected "${payload.name}".`); } setEditor(null); }} />}</section>;
+  return <section className={`customize-page ${navOpen ? "" : "nav-closed"}`}><aside className="customize-nav"><button onClick={onClose}><ArrowLeft size={16} /> {t("backToWorkspace")}</button><button className={section === "Skills" ? "current" : ""} onClick={() => setSection("Skills")}><Package size={18} /> {t("skills")}</button><button className={section === "Connectors" ? "current" : ""} onClick={() => setSection("Connectors")}><SquaresFour size={18} /> {t("connectors")}</button><div><span>{t("personalPlugins")}</span><button onClick={() => setSection("Plugins")}><Plus size={18} /></button></div><p>{t("giveExpertise")}</p><button className="outline-button" onClick={() => setSection("Plugins")}>{t("browsePlugins")}</button></aside><div className={`customize-main ${section !== "Overview" ? "directory-view" : ""}`}><Wrench size={section === "Overview" ? 72 : 42} /><h1>{section === "Overview" ? t("customizeNextAgent") : sectionLabels[section]}</h1><p>{t("customizeDesc")}</p>{section === "Overview" ? <div className="customize-cards"><button onClick={() => setSection("Connectors")}><SquaresFour size={22} /><span><strong>{t("connectApps")}</strong><small>{t("connectAppsDesc")}</small></span></button><button onClick={() => setEditor("skill")}><Package size={22} /><span><strong>{t("createSkills")}</strong><small>{t("createSkillsDesc")}</small></span></button><button onClick={() => setSection("Plugins")}><Plug size={22} /><span><strong>{t("browsePlugins")}</strong><small>{t("browsePluginsDesc")}</small></span></button></div> : <div className="customize-directory"><div className="directory-heading"><strong>{sectionLabels[section]}</strong><button className="primary-button" onClick={() => section === "Skills" ? setEditor("skill") : section === "Connectors" ? setEditor("connector") : togglePlugin(t("customPlugin"))}><Plus size={15} /> {t("add", sectionLabels[section])}</button></div>{section === "Skills" && skills.map((item) => <DirectoryRow key={item.name} title={item.name} description={item.description || item.trigger || t("localSkill")} />)}{section === "Connectors" && connectors.map((item) => <DirectoryRow key={item.id} title={item.name} description={item.url} enabled={item.enabled !== false} toggle={() => setConnectors((current) => current.map((entry) => entry.id === item.id ? { ...entry, enabled: entry.enabled === false } : entry))} remove={() => setConnectors((current) => current.filter((entry) => entry.id !== item.id))} />)}{section === "Plugins" && catalog.map((name) => <DirectoryRow key={name} title={name} description={t("localPluginDesc")} enabled={plugins.some((item) => item.name === name)} toggle={() => togglePlugin(name)} />)}{((section === "Skills" && !skills.length) || (section === "Connectors" && !connectors.length)) && <div className="filtered-empty">{t("noneYet", sectionLabels[section])}</div>}</div>}</div>{editor && <CustomizeEditor type={editor} close={() => setEditor(null)} save={async (payload) => { if (editor === "skill") { const result = await coreApi.createSkill(payload); setSkills((current) => [...current, result.skill]); showNotice(t("createdSkillNotice", payload.name)); } else { setConnectors((current) => [...current, { id: Date.now(), enabled: true, ...payload }]); showNotice(t("connectedNotice", payload.name)); } setEditor(null); }} />}</section>;
 }
 
 function EmptyState({ icon: Icon, title, body, action, onAction, actions }) {
@@ -1301,13 +1396,13 @@ function ItemGrid({ items, icon: Icon, emptyLabel = "No items", actions, status 
 }
 
 function CreateModal({ type, close, onCreate, chooseFolder }) {
-  const labels = { project: "project", scheduled: "scheduled task", artifact: "live artifact" };
+  const labels = { project: t("projectLabel"), scheduled: t("scheduledLabel"), artifact: t("artifactLabel") };
   const [name, setName] = useState("");
   const [detail, setDetail] = useState(type === "scheduled" ? "Daily at 9:00 AM" : "");
-  const [html, setHtml] = useState("<!doctype html><html><body style='font-family:system-ui;padding:32px'><h1>NextAgent live artifact</h1><p>Edit this HTML to build a live dashboard.</p></body></html>");
+  const [html, setHtml] = useState(t("liveArtifactDefaultHtml"));
   async function pickFolder() { const path = await chooseFolder(); if (path) { setDetail(path); if (!name) setName(path.split(/[\\/]/).pop()); } }
   const submit = () => onCreate(type === "project" ? { name, path: detail } : type === "scheduled" ? { name, prompt: name, schedule: detail } : { name, html });
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className="create-modal feature-create-modal"><button className="modal-close" onClick={close}><X size={18} /></button><span className="modal-icon"><Plus size={22} /></span><h2>{t("create")} {labels[type]}</h2><p>{type === "project" ? "Projects keep their own folder, context, instructions, and memory." : type === "scheduled" ? "Scheduled tasks can run repeatedly or whenever you choose Run now." : "Live artifacts are persistent interactive HTML views you can refresh and edit."}</p><label>Name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={`Name your ${labels[type]}`} /></label>{type === "project" && <label>Local folder<div className="field-with-button"><input value={detail} readOnly placeholder="Choose an existing folder" /><button className="outline-button" onClick={pickFolder}>Choose</button></div></label>}{type === "scheduled" && <label>Schedule<input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Daily at 9:00 AM" /></label>}{type === "artifact" && <label>HTML<textarea value={html} onChange={(event) => setHtml(event.target.value)} /></label>}<div><button className="outline-button" onClick={close}>{t("cancel")}</button><button className="primary-button" disabled={!name.trim() || (type === "project" && !detail)} onClick={submit}>{t("create")}</button></div></div></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><div className="create-modal feature-create-modal"><button className="modal-close" onClick={close}><X size={18} /></button><span className="modal-icon"><Plus size={22} /></span><h2>{t("createLabel", labels[type])}</h2><p>{type === "project" ? t("projectCreateDesc") : type === "scheduled" ? t("scheduledCreateDesc") : t("artifactCreateDesc")}</p><label>{t("name")}<input autoFocus value={name} onChange={(event) => setName(event.target.value)} placeholder={t("nameYour", labels[type])} /></label>{type === "project" && <label>{t("localFolder")}<div className="field-with-button"><input value={detail} readOnly placeholder={t("chooseExistingFolder")} /><button className="outline-button" onClick={pickFolder}>{t("choose")}</button></div></label>}{type === "scheduled" && <label>{t("schedule")}<input value={detail} onChange={(event) => setDetail(event.target.value)} placeholder="Daily at 9:00 AM" /></label>}{type === "artifact" && <label>{t("html")}<textarea value={html} onChange={(event) => setHtml(event.target.value)} /></label>}<div><button className="outline-button" onClick={close}>{t("cancel")}</button><button className="primary-button" disabled={!name.trim() || (type === "project" && !detail)} onClick={submit}>{t("create")}</button></div></div></div>;
 }
 
 function ArtifactModal({ artifact, close, save }) {
@@ -1323,7 +1418,7 @@ function CustomizeEditor({ type, close, save }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [content, setContent] = useState("");
-  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><form className="create-modal feature-create-modal" onSubmit={(event) => { event.preventDefault(); save(type === "skill" ? { name, description, content, trigger: description } : { name, url: description }); }}><button type="button" className="modal-close" onClick={close}><X size={18} /></button><h2>{type === "skill" ? "Create a skill" : "Add a connector"}</h2><p>{type === "skill" ? "Skills teach NextAgent a repeatable process and are loaded by the core." : "Add a custom app or MCP endpoint for this workspace."}</p><label>Name<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label><label>{type === "skill" ? "Description" : "Connector URL"}<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={type === "skill" ? "When and why NextAgent should use it" : "https://..."} /></label>{type === "skill" && <label>Instructions<textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="Describe the workflow NextAgent should follow." /></label>}<div><button type="button" className="outline-button" onClick={close}>{t("cancel")}</button><button className="primary-button" disabled={!name.trim() || !description.trim() || (type === "skill" && !content.trim())}>{t("save")}</button></div></form></div>;
+  return <div className="modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) close(); }}><form className="create-modal feature-create-modal" onSubmit={(event) => { event.preventDefault(); save(type === "skill" ? { name, description, content, trigger: description } : { name, url: description }); }}><button type="button" className="modal-close" onClick={close}><X size={18} /></button><h2>{type === "skill" ? t("createSkill") : t("addConnector")}</h2><p>{type === "skill" ? t("skillEditorDesc") : t("connectorEditorDesc")}</p><label>{t("name")}<input autoFocus value={name} onChange={(event) => setName(event.target.value)} /></label><label>{type === "skill" ? t("description") : t("connectorUrl")}<input value={description} onChange={(event) => setDescription(event.target.value)} placeholder={type === "skill" ? t("skillPlaceholder") : "https://..."} /></label>{type === "skill" && <label>{t("instructions")}<textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder={t("instructionPlaceholder")} /></label>}<div><button type="button" className="outline-button" onClick={close}>{t("cancel")}</button><button className="primary-button" disabled={!name.trim() || !description.trim() || (type === "skill" && !content.trim())}>{t("save")}</button></div></form></div>;
 }
 
 function RenameSessionModal({ session, close, save }) {
@@ -1342,32 +1437,46 @@ function SettingSwitch({ value, onChange, label }) {
 }
 
 function SettingChoice({ value, options, onChange }) {
-  return <div className="setting-choice">{options.map((option) => <button key={option} className={value === option ? "selected" : ""} onClick={() => onChange(option)}>{option}</button>)}</div>;
+  const labels = {
+    Warm: t("warm"),
+    White: t("white"),
+    "Blue mist": t("blueMist"),
+    Comfortable: t("comfortable"),
+    Compact: t("compact"),
+  };
+  return <div className="setting-choice">{options.map((option) => <button key={option} className={value === option ? "selected" : ""} onClick={() => onChange(option)}>{labels[option] || option}</button>)}</div>;
 }
 
 function SettingsPage({ settings, setSettings, configured, close }) {
   const [section, setSection] = useState("general");
   const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
-  const sections = [t("general"), t("privacy"), t("capabilities"), t("nextAgent"), t("collaboration")];
+  const sections = ["general", "privacy", "capabilities", "nextAgent", "collaboration"];
+  const descriptions = {
+    general: t("settingsGeneralDesc"),
+    privacy: t("settingsPrivacyDesc"),
+    capabilities: t("settingsCapabilitiesDesc"),
+    nextAgent: t("settingsNextAgentDesc"),
+    collaboration: t("settingsCollaborationDesc"),
+  };
 
   return <section className="settings-page">
     <aside className="settings-nav">
       <button className="settings-back" onClick={close}><ArrowLeft size={17} /> {t("backToWorkspace")}</button>
       <span>{t("settings")}</span>
-      {sections.map((item) => <button key={item} className={section === item ? "current" : ""} onClick={() => setSection(item)}>{item}{item === t("collaboration") && <small>{t("comingSoon")}</small>}</button>)}
+      {sections.map((item) => <button key={item} className={section === item ? "current" : ""} onClick={() => setSection(item)}>{t(item)}{item === "collaboration" && <small>{t("comingSoon")}</small>}</button>)}
       <div className="settings-connection"><span className={configured ? "online" : ""} /><div><strong>{t("deepseekConnection")}</strong><small>{configured ? t("connectedLocally") : t("notConfigured")}</small></div></div>
     </aside>
     <div className="settings-content">
-      <header><h1>{section}</h1><p>{section === t("general") ? "Choose how NextAgent behaves day to day." : section === t("privacy") ? "Control what NextAgent remembers on this device." : section === t("capabilities") ? "Manage Agent mode and the skills available to it." : section === t("nextAgent") ? "Shape the look and feel of your workspace." : "Work together with shared agents and projects."}</p></header>
-      {section === t("general") && <>
+      <header><h1>{t(section)}</h1><p>{descriptions[section]}</p></header>
+      {section === "general" && <>
         <SettingsGroup title={t("behavior")}>
           <SettingsLine title={t("launchMode")} description={t("launchModeDesc")}><SettingChoice value={settings.launchMode} options={["Dswork", "Code"]} onChange={(value) => update("launchMode", value)} /></SettingsLine>
           <SettingsLine title={t("enterToSend")} description={t("enterToSendDesc")}><SettingSwitch label={t("enterToSend")} value={settings.enterToSend} onChange={(value) => update("enterToSend", value)} /></SettingsLine>
           <SettingsLine title={t("recentDetails")} description={t("recentDetailsDesc")}><SettingSwitch label={t("recentDetails")} value={settings.showRecentDetails} onChange={(value) => update("showRecentDetails", value)} /></SettingsLine>
-          <SettingsLine title={t("interfaceLanguage")} description={t("interfaceLanguageDesc")}><b>English</b></SettingsLine>
+          <SettingsLine title={t("interfaceLanguage")} description={t("interfaceLanguageDesc")}><b>{t("currentLanguage")}</b></SettingsLine>
         </SettingsGroup>
       </>}
-      {section === t("privacy") && <>
+      {section === "privacy" && <>
         <SettingsGroup title={t("localMemory")}>
           <SettingsLine title={t("conversationMemory")} description={t("conversationMemoryDesc")}><SettingSwitch label={t("conversationMemory")} value={settings.conversationMemory} onChange={(value) => update("conversationMemory", value)} /></SettingsLine>
           <SettingsLine title={t("userMemory")} description={t("userMemoryDesc")}><SettingSwitch label={t("userMemory")} value={settings.userMemory} onChange={(value) => update("userMemory", value)} /></SettingsLine>
@@ -1375,15 +1484,15 @@ function SettingsPage({ settings, setSettings, configured, close }) {
         </SettingsGroup>
         <div className="privacy-note"><Info size={18} /><span><strong>{t("localByDefault")}</strong><small>{t("localByDefaultDesc")}</small></span></div>
       </>}
-      {section === t("capabilities") && <>
+      {section === "capabilities" && <>
         <SettingsGroup title={t("agent")}>
           <SettingsLine title={t("agentMode")} description={t("agentModeDesc")}><SettingSwitch label={t("agentMode")} value={settings.agentMode} onChange={(value) => update("agentMode", value)} /></SettingsLine>
         </SettingsGroup>
         <SettingsGroup title={t("skillsSettings")} subtitle={t("skillsSettingsDesc")}>
-          <div className="skill-settings-list">{capabilitySkills.map(([name, description]) => <div key={name}><span className="skill-symbol"><Package size={17} /></span><span><strong>{name}</strong><small>{description}</small></span><b>Active</b></div>)}</div>
+          <div className="skill-settings-list">{capabilitySkills.map(([name, description]) => <div key={name}><span className="skill-symbol"><Package size={17} /></span><span><strong>{name}</strong><small>{description}</small></span><b>{t("activeSkill")}</b></div>)}</div>
         </SettingsGroup>
       </>}
-      {section === t("nextAgent") && <>
+      {section === "nextAgent" && <>
         <SettingsGroup title={t("appearance")}>
           <SettingsLine title={t("background")} description={t("backgroundDesc")}><SettingChoice value={settings.background} options={["Warm", "White", "Blue mist"]} onChange={(value) => update("background", value)} /></SettingsLine>
           <SettingsLine title={t("density")} description={t("densityDesc")}><SettingChoice value={settings.density} options={["Comfortable", "Compact"]} onChange={(value) => update("density", value)} /></SettingsLine>
@@ -1391,7 +1500,7 @@ function SettingsPage({ settings, setSettings, configured, close }) {
         </SettingsGroup>
         <div className={`settings-preview theme-${settings.background.toLowerCase().replace(" ", "-")}`}><Sparkle size={25} weight="fill" /><div><strong>{t("appearancePreview")}</strong><small>{t("appearancePreviewDesc")}</small></div></div>
       </>}
-      {section === t("collaboration") && <div className="collaboration-placeholder"><SquaresFour size={50} /><h2>{t("collaborationComing")}</h2><p>{t("collaborationDesc")}</p><span>{t("notYetAvailable")}</span></div>}
+      {section === "collaboration" && <div className="collaboration-placeholder"><SquaresFour size={50} /><h2>{t("collaborationComing")}</h2><p>{t("collaborationDesc")}</p><span>{t("notYetAvailable")}</span></div>}
     </div>
   </section>;
 }
