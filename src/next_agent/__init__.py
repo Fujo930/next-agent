@@ -1,6 +1,6 @@
 """Next Agent — The best DeepSeek agent for everyone."""
 
-__version__ = "0.1.0"
+__version__ = "0.2.3"
 __author__ = "Next Agent Contributors"
 
 from .agent import Agent

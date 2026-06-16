@@ -439,7 +439,7 @@ class SessionStore:
 class GUIRequestHandler(BaseHTTPRequestHandler):
     store: SessionStore
     static_dir: Path | None = None
-    server_version = "NextAgentGUI/0.1"
+    server_version = "NextAgentGUI/0.2.3"
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -479,7 +479,7 @@ class GUIRequestHandler(BaseHTTPRequestHandler):
             self._send(HTTPStatus.OK, {
                 "ok": True,
                 "service": "next-agent-core",
-                "version": "0.1.0",
+                "version": "0.2.3",
                 "provider_configured": self.store.provider_configured(),
             })
         elif path == "/api/preflight":

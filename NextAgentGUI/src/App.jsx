@@ -47,7 +47,17 @@ import { coreApi } from "./core-api";
 import zh from "./zh-CN.js";
 import en from "./en.js";
 
-let _lang = "en";
+function readSavedLanguage() {
+  try {
+    if (typeof localStorage === "undefined") return "zh";
+    const saved = localStorage.getItem("nextagent-lang");
+    return saved === "en" || saved === "zh" ? saved : "zh";
+  } catch {
+    return "zh";
+  }
+}
+
+let _lang = readSavedLanguage();
 export function t(key, ...args) {
   if (_lang === "zh" && zh[key]) {
     const v = zh[key];
@@ -267,7 +277,7 @@ export function App() {
   const [resetCountdown, setResetCountdown] = useState(null);
   const [notice, setNotice] = useState("");
   const [lang, setLang] = useState(() => {
-    try { return localStorage.getItem("nextagent-lang") || "en"; } catch { return "en"; }
+    return readSavedLanguage();
   });
 
   useEffect(() => {
@@ -301,6 +311,10 @@ export function App() {
   useEffect(() => {
     if (!settings.agentMode && mode === "Code") setMode("Dswork");
   }, [settings.agentMode, mode]);
+
+  useEffect(() => {
+    if (isCode && !codeConversation) setStatsView("overview");
+  }, [isCode, codeConversation]);
 
   async function refreshCore() {
     const [health, sessionData, stats, workspace, savedState] = await Promise.all([
@@ -446,6 +460,7 @@ export function App() {
     setSent(false);
     setNewItemActive(true);
     setActiveId(null);
+    if (nextMode === "Code") setStatsView("overview");
     if (nextMode === "Dswork") setWorkPage("Home");
   }
 
@@ -456,6 +471,7 @@ export function App() {
     setSent(false);
     setCoreError("");
     setCoreResponse("");
+    if (isCode) setStatsView("overview");
   }
 
   function openCustomize() {

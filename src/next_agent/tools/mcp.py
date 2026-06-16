@@ -61,7 +61,7 @@ class MCPClient:
             result = self._send_request("initialize", {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {},
-                "clientInfo": {"name": "next-agent", "version": "0.1.0"},
+                "clientInfo": {"name": "next-agent", "version": "0.2.3"},
             })
             return result is not None
 

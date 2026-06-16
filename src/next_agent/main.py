@@ -43,7 +43,7 @@ def _parse_toolsets(args, file_config: dict) -> set[str]:
 def _print_banner():
     print()
     print("  ╔══════════════════════════════════════════╗")
-    print("  ║          Next Agent v0.1.0                ║")
+    print("  ║          Next Agent v0.2.3                ║")
     print("  ║    The best DeepSeek agent for everyone   ║")
     print("  ╚══════════════════════════════════════════╝")
     print()
@@ -143,7 +143,7 @@ def _interactive_loop(agent: Agent):
 
 def _single_task(agent: Agent, task: str):
     """Run a single task and exit."""
-    print(f"\nNext Agent (v0.1.0) — {agent.config.model}\n")
+    print(f"\nNext Agent (v0.2.3) — {agent.config.model}\n")
     print(f"Task: {task}\n")
     print("─" * 50)
 
@@ -223,7 +223,7 @@ def main():
     args = parser.parse_args()
 
     if args.version:
-        print("Next Agent v0.1.0")
+        print("Next Agent v0.2.3")
         sys.exit(0)
 
     # ── Setup mode ──

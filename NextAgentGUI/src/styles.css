@@ -1629,6 +1629,22 @@ h1 {
   width: min(860px, calc(100vw - 64px));
 }
 
+.code-mode .composer-wrap {
+  position: fixed;
+  left: calc(50% + 152px);
+  right: auto;
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: min(860px, calc(100vw - 364px));
+  max-width: calc(100vw - 364px);
+  transform: translateX(-50%);
+}
+
+.code-mode .sidebar.closed + .main-panel .composer-wrap {
+  left: 50%;
+  width: min(860px, calc(100vw - 64px));
+  max-width: calc(100vw - 64px);
+}
+
 .context-pills {
   display: flex;
   gap: 6px;
@@ -2144,8 +2160,11 @@ h1 {
 }
 
 .code-dashboard {
-  width: min(850px, calc(100% - 48px));
-  margin: 55px auto 215px;
+  flex: 0 0 auto;
+  width: min(850px, calc(100vw - 520px));
+  max-width: calc(100% - 64px);
+  box-sizing: border-box;
+  margin: 55px auto 245px;
 }
 
 .code-heading {
@@ -2225,12 +2244,15 @@ h1 {
 }
 
 .usage-card {
-  width: 570px;
+  width: min(570px, 100%);
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0 auto;
   padding: 12px;
   border: 1px solid #ebe9e4;
   border-radius: 12px;
   background: #f2f2f0;
+  overflow: hidden;
 }
 
 .usage-toolbar {
@@ -2259,7 +2281,7 @@ h1 {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 5px;
 }
 
@@ -2290,8 +2312,8 @@ h1 {
 
 .heatmap {
   display: grid;
-  grid-template-columns: repeat(20, 1fr);
-  grid-template-rows: repeat(7, 1fr);
+  grid-template-columns: repeat(20, minmax(0, 1fr));
+  grid-template-rows: repeat(7, minmax(0, 1fr));
   grid-auto-flow: column;
   gap: 4px;
   margin-top: 9px;
@@ -2321,8 +2343,9 @@ h1 {
 }
 
 .model-usage div {
+  min-width: 0;
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 5px 12px;
   padding: 10px;
   border-radius: 8px;
@@ -2331,6 +2354,7 @@ h1 {
 }
 
 .model-usage i {
+  min-width: 0;
   height: 6px;
   grid-column: 1 / -1;
   overflow: hidden;
@@ -3409,6 +3433,7 @@ h1 {
   .work-content,
   .feature-page {
     width: calc(100% - 28px);
+    max-width: calc(100% - 28px);
   }
 
   .customize-page {

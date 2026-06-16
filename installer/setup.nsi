@@ -1,6 +1,6 @@
 ; NextAgent Windows Installer
 !define PRODUCT_NAME "NextAgent"
-!define PRODUCT_VERSION "0.2.0"
+!define PRODUCT_VERSION "0.2.3"
 !define PRODUCT_PUBLISHER "NextAgent"
 
 SetCompressor /SOLID lzma
