@@ -3564,16 +3564,25 @@ h1 {
   min-height: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+  padding-bottom: 16px;
 }
 
 .conversation-feed {
   width: min(820px, 100%);
   margin: 0 auto;
-  padding: 0 14px 24px;
+  padding: 0 14px 48px;
 }
 
 .conversation-composer {
   flex-shrink: 0;
+  width: min(760px, 100%);
+  min-height: 112px;
+  margin: 8px auto 2px;
+  padding: 15px 16px 12px;
+  border: 1px solid #d8d8d3;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow: 0 8px 28px #2525250a;
 }
 
 .assistant-turn {
@@ -3858,17 +3867,6 @@ h1 {
 @keyframes whale-ripple {
   0%, 100% { opacity: .18; transform: scaleX(.72); }
   50% { opacity: .45; transform: scaleX(1); }
-}
-
-.conversation-composer {
-  width: min(760px, 100%);
-  min-height: 112px;
-  margin: 10px auto 2px;
-  padding: 15px 16px 12px;
-  border: 1px solid #d8d8d3;
-  border-radius: 24px;
-  background: #fff;
-  box-shadow: 0 16px 44px #25252512;
 }
 
 .conversation-composer textarea {
