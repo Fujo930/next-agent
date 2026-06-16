@@ -821,11 +821,13 @@ export function App() {
 
         <article className="main-panel">
           {isCode ? (
-            codeConversation ? (
-              <div className="code-layout">
+            <div className="code-layout">
+              {codeConversation ? (
                 <CodeConversation conversation={codeConversation} />
-                {isCode && (
-                  <div className="composer-wrap">
+              ) : (
+                <CodeDashboard range={range} setRange={setRange} statsView={statsView} setStatsView={setStatsView} stats={coreStats} online={coreOnline} configured={coreConfigured} error={coreError} busy={coreBusy} response="" />
+              )}
+              <div className="composer-wrap">
               <div className="context-pills">
                 <CodePopover open={codeMenu === "runtime"} onToggle={() => setCodeMenu(codeMenu === "runtime" ? null : "runtime")} trigger={<><Monitor size={15} /> {t("local")}</>}>
                   <span className="popover-label">{t("runEnvironment")}</span>
@@ -871,9 +873,7 @@ export function App() {
                 <EffortMenu value={effort} setValue={setEffort} />
               </div>
             </div>
-          )}
           </div>
-        ) : <CodeDashboard range={range} setRange={setRange} statsView={statsView} setStatsView={setStatsView} stats={coreStats} online={coreOnline} configured={coreConfigured} error={coreError} busy={coreBusy} response="" />
       ) : (
         workPage === "Home" ? <WorkDashboard prompt={prompt} setPrompt={setPrompt} sendPrompt={sendPrompt} queuePrompt={queuePrompt} stopResponse={stopResponse} queuedPrompt={queuedPrompt} model={model} setModel={setModel} items={workItems} setItems={setWorkItems} sent={sent} conversation={workConversation} busy={coreBusy} enterToSend={settings.enterToSend} />
           : workPage === "Projects" ? <ProjectsPage projects={projects} setProjects={setProjects} openModal={setModal} chooseFolder={chooseFolder} openPath={openLocalPath} setWorkPage={setWorkPage} setSelectedWorkdir={setSelectedWorkdir} />
