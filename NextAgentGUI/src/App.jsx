@@ -821,17 +821,11 @@ export function App() {
 
         <article className="main-panel">
           {isCode ? (
-            codeConversation ? <CodeConversation conversation={codeConversation} /> : <CodeDashboard range={range} setRange={setRange} statsView={statsView} setStatsView={setStatsView} stats={coreStats} online={coreOnline} configured={coreConfigured} error={coreError} busy={coreBusy} response="" />
-          ) : (
-            workPage === "Home" ? <WorkDashboard prompt={prompt} setPrompt={setPrompt} sendPrompt={sendPrompt} queuePrompt={queuePrompt} stopResponse={stopResponse} queuedPrompt={queuedPrompt} model={model} setModel={setModel} items={workItems} setItems={setWorkItems} sent={sent} conversation={workConversation} busy={coreBusy} enterToSend={settings.enterToSend} />
-              : workPage === "Projects" ? <ProjectsPage projects={projects} setProjects={setProjects} openModal={setModal} chooseFolder={chooseFolder} openPath={openLocalPath} setWorkPage={setWorkPage} setSelectedWorkdir={setSelectedWorkdir} />
-                : workPage === "Scheduled" ? <ScheduledPage scheduled={scheduled} setScheduled={setScheduled} keepAwake={keepAwake} setKeepAwake={setKeepAwake} openModal={setModal} showNotice={showNotice} />
-                  : workPage === "Live artifacts" ? <ArtifactsPage artifacts={artifacts} setArtifacts={setArtifacts} openModal={setModal} />
-                    : <WorkDashboard prompt={prompt} setPrompt={setPrompt} sendPrompt={sendPrompt} queuePrompt={queuePrompt} stopResponse={stopResponse} queuedPrompt={queuedPrompt} model={model} setModel={setModel} items={workItems} setItems={setWorkItems} sent={sent} conversation={workConversation} busy={coreBusy} enterToSend={settings.enterToSend} />
-          )}
-
-          {isCode && (
-            <div className="composer-wrap">
+            codeConversation ? (
+              <div className="code-layout">
+                <CodeConversation conversation={codeConversation} />
+                {isCode && (
+                  <div className="composer-wrap">
               <div className="context-pills">
                 <CodePopover open={codeMenu === "runtime"} onToggle={() => setCodeMenu(codeMenu === "runtime" ? null : "runtime")} trigger={<><Monitor size={15} /> {t("local")}</>}>
                   <span className="popover-label">{t("runEnvironment")}</span>
@@ -878,7 +872,16 @@ export function App() {
               </div>
             </div>
           )}
-        </article>
+          </div>
+        ) : <CodeDashboard range={range} setRange={setRange} statsView={statsView} setStatsView={setStatsView} stats={coreStats} online={coreOnline} configured={coreConfigured} error={coreError} busy={coreBusy} response="" />
+      ) : (
+        workPage === "Home" ? <WorkDashboard prompt={prompt} setPrompt={setPrompt} sendPrompt={sendPrompt} queuePrompt={queuePrompt} stopResponse={stopResponse} queuedPrompt={queuedPrompt} model={model} setModel={setModel} items={workItems} setItems={setWorkItems} sent={sent} conversation={workConversation} busy={coreBusy} enterToSend={settings.enterToSend} />
+          : workPage === "Projects" ? <ProjectsPage projects={projects} setProjects={setProjects} openModal={setModal} chooseFolder={chooseFolder} openPath={openLocalPath} setWorkPage={setWorkPage} setSelectedWorkdir={setSelectedWorkdir} />
+            : workPage === "Scheduled" ? <ScheduledPage scheduled={scheduled} setScheduled={setScheduled} keepAwake={keepAwake} setKeepAwake={setKeepAwake} openModal={setModal} showNotice={showNotice} />
+              : workPage === "Live artifacts" ? <ArtifactsPage artifacts={artifacts} setArtifacts={setArtifacts} openModal={setModal} />
+                : <WorkDashboard prompt={prompt} setPrompt={setPrompt} sendPrompt={sendPrompt} queuePrompt={queuePrompt} stopResponse={stopResponse} queuedPrompt={queuedPrompt} model={model} setModel={setModel} items={workItems} setItems={setWorkItems} sent={sent} conversation={workConversation} busy={coreBusy} enterToSend={settings.enterToSend} />
+      )}
+    </article>
       </section>}
       {modal && <CreateModal type={modal} chooseFolder={chooseFolder} close={() => setModal(null)} onCreate={(item) => {
         if (modal === "project") setProjects((current) => [{ id: Date.now(), ...item, meta: item.path || "Local project", updatedAt: Date.now() }, ...current]);

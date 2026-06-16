@@ -1591,6 +1591,29 @@ h1 {
   color: #a09d96;
 }
 
+.code-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.code-layout > .code-conversation {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.code-layout .composer-wrap {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  z-index: auto;
+  width: 100%;
+  transform: none;
+}
+
 .composer-wrap {
   position: fixed;
   left: calc(50% + 152px);
